@@ -16,7 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Circle, Path, Svg } from 'react-native-svg';
+import { Circle, Defs, LinearGradient, Path, Rect, Stop, Svg } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import * as Localization from 'expo-localization';
 import { captureRef } from 'react-native-view-shot';
@@ -75,7 +75,7 @@ const ACTIVITIES: Activity[] = [
   { id: 'study', name: 'Ders çalışıyorum', icon: 'book-outline', bg: '#FDEDF4', fg: '#C2417A', world: 6, country: 7, peaks: [{ hour: 20, spread: 4 }] },
   { id: 'sport', name: 'Spor yapıyorum', icon: 'barbell-outline', bg: '#E9F8EC', fg: '#1F8A3E', world: 4, country: 3, peaks: [{ hour: 19, spread: 3 }] },
   { id: 'tv', name: 'Dizi izliyorum', icon: 'tv-outline', bg: '#EEF1F5', fg: '#475569', world: 7, country: 8, peaks: [{ hour: 21, spread: 3 }] },
-  { id: 'coffee', name: 'Kahve içiyorum', icon: 'cafe-outline', bg: '#F7EEE2', fg: '#8A5A2B', world: 5, country: 6, peaks: [{ hour: 9, spread: 2.5 }] },
+  { id: 'coffee', name: 'Kahve içiyorum', icon: 'cafe-outline', bg: '#FFF1F2', fg: '#E11D48', world: 5, country: 6, peaks: [{ hour: 9, spread: 2.5 }] },
   { id: 'gaming', name: 'Oyun oynuyorum', icon: 'game-controller-outline', bg: '#F2E9FC', fg: '#9333EA', world: 9, country: 6, peaks: [{ hour: 22, spread: 4 }] },
   { id: 'shop', name: 'Alışveriş yapıyorum', icon: 'cart-outline', bg: '#FFF8DE', fg: '#B7860B', world: 3.5, country: 3, peaks: [{ hour: 15, spread: 4 }] },
   { id: 'chores', name: 'Ev işi yapıyorum', icon: 'home-outline', bg: '#E8F6FB', fg: '#0B7BA3', world: 5, country: 2, peaks: [{ hour: 11, spread: 4 }] },
@@ -85,7 +85,7 @@ const ACTIVITIES: Activity[] = [
   { id: 'scrolling', name: 'Telefonda geziniyorum', icon: 'phone-portrait-outline', bg: '#ECF6FC', fg: '#1D6FA5', world: 10, country: 8, peaks: [{ hour: 22, spread: 3 }] },
   { id: 'procrastinating', name: 'Erteliyorum', icon: 'time-outline', bg: '#FDF0F5', fg: '#9D174D', world: 8, country: 6, peaks: [{ hour: 15, spread: 4 }] },
   { id: 'resting', name: 'Dinleniyorum', icon: 'leaf-outline', bg: '#F1F5EB', fg: '#5B7A3A', world: 8, country: 6, peaks: [{ hour: 14, spread: 5 }] },
-  { id: 'money', name: 'Borçlarımı düşünüyorum', icon: 'wallet-outline', bg: '#FEF8EA', fg: '#A66A00', world: 5, country: 4, peaks: [{ hour: 21, spread: 4 }] },
+  { id: 'money', name: 'Borçlarımı düşünüyorum', icon: 'wallet-outline', bg: '#ECFEFF', fg: '#0891B2', world: 5, country: 4, peaks: [{ hour: 21, spread: 4 }] },
 ];
 
 const FILTERS = [
@@ -293,31 +293,87 @@ function PressableScale({
   );
 }
 
+function Globe({ size = 96 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 100 100">
+      <Circle cx={50} cy={50} r={46} fill="#3B7DE8" />
+      <Path
+        d="M14 38 Q24 26 38 30 Q46 20 58 26 Q70 22 78 32 Q82 40 74 46 Q66 42 58 46 Q50 40 40 46 Q30 44 24 50 Q16 46 14 38 Z"
+        fill="#3CB878"
+      />
+      <Path
+        d="M20 62 Q30 56 40 62 Q50 58 58 66 Q52 78 40 76 Q26 80 20 62 Z"
+        fill="#3CB878"
+      />
+      <Path
+        d="M68 58 Q78 54 84 62 Q80 70 70 68 Q64 64 68 58 Z"
+        fill="#3CB878"
+      />
+      <Circle cx={50} cy={50} r={46} stroke="#ffffff" strokeOpacity={0.3} strokeWidth={1.2} fill="none" />
+      <Path d="M4 50 A46 15 0 0 0 96 50" stroke="#ffffff" strokeOpacity={0.28} strokeWidth={1} fill="none" />
+      <Path d="M4 50 A46 15 0 0 1 96 50" stroke="#ffffff" strokeOpacity={0.28} strokeWidth={1} fill="none" />
+      <Path d="M50 4 A46 46 0 0 1 50 96" stroke="#ffffff" strokeOpacity={0.22} strokeWidth={1} fill="none" />
+      <Circle cx={36} cy={32} r={16} fill="#ffffff" opacity={0.16} />
+    </Svg>
+  );
+}
+
+function InstaBadge({ size = 22 }: { size?: number }) {
+  return (
+    <View style={{ width: size, height: size, marginRight: 7 }}>
+      <Svg width={size} height={size} viewBox="0 0 26 26">
+        <Defs>
+          <LinearGradient id="ig" x1="0" y1="26" x2="26" y2="0">
+            <Stop offset="0" stopColor="#FEDA75" />
+            <Stop offset="0.35" stopColor="#FA7E1E" />
+            <Stop offset="0.65" stopColor="#D62976" />
+            <Stop offset="1" stopColor="#962FBF" />
+          </LinearGradient>
+        </Defs>
+        <Rect width="26" height="26" rx="7" fill="url(#ig)" />
+      </Svg>
+      <View
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Ionicons name="logo-instagram" size={size * 0.62} color="#ffffff" />
+      </View>
+    </View>
+  );
+}
+
 function Splash() {
   const rot = useRef(new Animated.Value(0)).current;
   const fade = useRef(new Animated.Value(0)).current;
+  const pop = useRef(new Animated.Value(0.85)).current;
   useEffect(() => {
     Animated.loop(
-      Animated.timing(rot, { toValue: 1, duration: 1100, easing: Easing.linear, useNativeDriver: true })
+      Animated.timing(rot, { toValue: 1, duration: 1400, easing: Easing.linear, useNativeDriver: true })
     ).start();
-    Animated.timing(fade, { toValue: 1, duration: 500, delay: 200, useNativeDriver: true }).start();
+    Animated.spring(pop, { toValue: 1, useNativeDriver: true, speed: 14, bounciness: 8 }).start();
+    Animated.timing(fade, { toValue: 1, duration: 500, delay: 250, useNativeDriver: true }).start();
   }, []);
   const spin = rot.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
   return (
     <SafeAreaView style={styles.splashSafe}>
       <View style={styles.splashCenter}>
-        <View style={styles.splashRingWrap}>
-          <Animated.View style={{ transform: [{ rotate: spin }] }}>
-            <Svg width={72} height={72} viewBox="0 0 72 72">
-              <Circle cx={36} cy={36} r={30} stroke="#ffffff" strokeWidth={4.5} strokeOpacity={0.25} fill="none" />
-              <Path d="M36 6 A30 30 0 0 1 66 36" stroke="#ffffff" strokeWidth={4.5} strokeLinecap="round" fill="none" />
+        <Animated.View style={[styles.splashRingWrap, { transform: [{ scale: pop }] }]}>
+          <Animated.View style={[styles.splashRingAbs, { transform: [{ rotate: spin }] }]}>
+            <Svg width={128} height={128} viewBox="0 0 128 128">
+              <Circle cx={64} cy={64} r={58} stroke="#ffffff" strokeWidth={4} strokeOpacity={0.22} fill="none" />
+              <Path d="M64 6 A58 58 0 0 1 122 64" stroke="#ffffff" strokeWidth={4} strokeLinecap="round" fill="none" />
             </Svg>
           </Animated.View>
-          <View style={styles.splashIconCenter}>
-            <Ionicons name="earth-outline" size={28} color="#ffffff" />
-          </View>
-        </View>
-        <Animated.View style={{ opacity: fade, marginTop: 26 }}>
+          <Globe size={104} />
+        </Animated.View>
+        <Animated.View style={{ opacity: fade, marginTop: 30 }}>
           <Text style={styles.splashQuestion}>Şu an dünyada{'\n'}kim ne yapıyor?</Text>
           <Text style={styles.splashHint}>Merak ediyorsan hemen öğren</Text>
         </Animated.View>
@@ -511,6 +567,17 @@ function ShareCard({
   );
 }
 
+function BackgroundDecor() {
+  return (
+    <View style={styles.bgDecor} pointerEvents="none">
+      <View style={[styles.blob, { top: -70, left: -50, width: 220, height: 220, backgroundColor: BRAND, opacity: 0.06 }]} />
+      <View style={[styles.blob, { top: 160, right: -70, width: 190, height: 190, backgroundColor: '#F59E0B', opacity: 0.05 }]} />
+      <View style={[styles.blob, { bottom: 60, left: -60, width: 210, height: 210, backgroundColor: '#10B981', opacity: 0.05 }]} />
+      <View style={[styles.blob, { bottom: -80, right: -40, width: 180, height: 180, backgroundColor: '#EC4899', opacity: 0.045 }]} />
+    </View>
+  );
+}
+
 export default function HomeScreen() {
   const [fontsLoaded] = useFonts({ DMSans_400Regular, DMSans_500Medium, DMSans_700Bold });
   const [ready, setReady] = useState(false);
@@ -531,10 +598,9 @@ export default function HomeScreen() {
   useEffect(() => {
     ensureSession();
     (async () => {
-      const [p, c, s] = await Promise.all([
+      const [p, c] = await Promise.all([
         AsyncStorage.getItem('profile'),
         AsyncStorage.getItem('consent'),
-        AsyncStorage.getItem('session'),
       ]);
       let loadedProfile: Profile = p ? JSON.parse(p) : {};
       if (c === 'yes') setConsent(true);
@@ -548,17 +614,6 @@ export default function HomeScreen() {
         } catch {}
       }
       setProfile(loadedProfile);
-
-      if (s) {
-        const saved = JSON.parse(s);
-        const a = ACTIVITIES.find((x) => x.id === saved.activityId);
-        if (a && Date.now() - saved.startedAt < SESSION_MS) {
-          setSelected(a);
-          setStartedAt(saved.startedAt);
-        } else {
-          AsyncStorage.removeItem('session');
-        }
-      }
       setReady(true);
     })();
   }, []);
@@ -607,12 +662,10 @@ export default function HomeScreen() {
     setFilter('world');
     setEditing(false);
     setRatio(null);
-    AsyncStorage.setItem('session', JSON.stringify({ activityId: a.id, startedAt: t }));
     pushPresence(a.id, profile, consent).then(() => setRefreshKey((k) => k + 1));
   }
 
   function changeActivity() {
-    AsyncStorage.removeItem('session');
     clearPresence();
     setSelected(null);
     setStartedAt(null);
@@ -629,7 +682,6 @@ export default function HomeScreen() {
       const t = Date.now();
       setStartedAt(t);
       setNow(t);
-      AsyncStorage.setItem('session', JSON.stringify({ activityId: selected.id, startedAt: t }));
       pushPresence(selected.id, next, consent).then(() => setRefreshKey((k) => k + 1));
     }
   }
@@ -657,7 +709,7 @@ export default function HomeScreen() {
           text: 'Sil',
           style: 'destructive',
           onPress: async () => {
-            await AsyncStorage.multiRemove(['profile', 'consent', 'session']);
+            await AsyncStorage.multiRemove(['profile', 'consent']);
             await clearPresence();
             setProfile({});
             setConsent(false);
@@ -794,8 +846,8 @@ export default function HomeScreen() {
         <FadeIn style={styles.resultContainer}>
           <View style={styles.topRow}>
             <View style={styles.chip}>
-              <Ionicons name={selected.icon} size={18} color={fg} />
-              <Text style={[styles.chipText, { color: fg }]}>{selected.name}</Text>
+              <Ionicons name={selected.icon} size={20} color={fg} />
+              <Text style={styles.chipText}>{selected.name}</Text>
             </View>
           </View>
 
@@ -835,16 +887,13 @@ export default function HomeScreen() {
 
           <View style={styles.buttonsRow}>
             {resultShown ? (
-              <Pressable
-                style={[styles.button, styles.shareBtn, { backgroundColor: fg }]}
-                onPress={shareResult}
-              >
-                <Ionicons name="share-outline" size={17} color="#ffffff" style={{ marginRight: 6 }} />
-                <Text style={[styles.buttonText, { color: '#ffffff' }]}>Paylaş</Text>
+              <Pressable style={[styles.button, styles.shareBtn]} onPress={shareResult}>
+                <InstaBadge size={20} />
+                <Text style={styles.buttonText}>Paylaş</Text>
               </Pressable>
             ) : null}
             <Pressable
-              style={[styles.button, resultShown && { flex: 1 }]}
+              style={styles.button}
               onPress={() => {
                 tap();
                 changeActivity();
@@ -862,6 +911,7 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      <BackgroundDecor />
       <FadeIn style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.container}>
           <Text style={styles.title}>
@@ -897,6 +947,8 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#F7F7F9' },
+  bgDecor: { ...StyleSheet.absoluteFillObject, overflow: 'hidden' },
+  blob: { position: 'absolute', borderRadius: 999 },
   container: { padding: 20, paddingBottom: 28 },
   title: { fontFamily: F.bold, fontSize: 28, color: INK, marginTop: 8, letterSpacing: -0.5 },
   titleAccent: { color: BRAND },
@@ -938,8 +990,8 @@ const styles = StyleSheet.create({
 
   splashSafe: { flex: 1, backgroundColor: BRAND },
   splashCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
-  splashRingWrap: { width: 72, height: 72, alignItems: 'center', justifyContent: 'center' },
-  splashIconCenter: { position: 'absolute' },
+  splashRingWrap: { width: 128, height: 128, alignItems: 'center', justifyContent: 'center' },
+  splashRingAbs: { position: 'absolute' },
   splashQuestion: {
     fontFamily: F.bold,
     fontSize: 24,
@@ -963,11 +1015,11 @@ const styles = StyleSheet.create({
     gap: 8,
     backgroundColor: '#ffffff',
     borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
     ...SOFT_SHADOW,
   },
-  chipText: { fontFamily: F.medium, fontSize: 14 },
+  chipText: { fontFamily: F.bold, fontSize: 17, color: INK },
 
   filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 18 },
   filterBtn: {
@@ -1074,13 +1126,15 @@ const styles = StyleSheet.create({
   buttonsRow: { flexDirection: 'row', gap: 10 },
   button: {
     flex: 1,
+    flexDirection: 'row',
     backgroundColor: '#ffffff',
     borderRadius: 14,
     paddingVertical: 15,
     alignItems: 'center',
+    justifyContent: 'center',
     ...SOFT_SHADOW,
   },
-  shareBtn: { flexDirection: 'row', justifyContent: 'center' },
+  shareBtn: {},
   buttonText: { fontFamily: F.medium, fontSize: 16, color: INK },
 
   shareCardWrap: { position: 'absolute', top: 0, left: 0, opacity: 0 },

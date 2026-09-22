@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useRef, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -39,19 +39,32 @@ const SOFT = '#5b5b66';
 const FAINT = '#8d8d98';
 const BRAND = '#4F46E5';
 
+const SP = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, xxxl: 32 };
+const FS = { xs: 12, sm: 13, base: 14, md: 15, lg: 17, xl: 20, xxl: 28 };
+
+const DUR = 220;
+const EASE = Easing.out(Easing.cubic);
+
 const CARD_SHADOW = {
   shadowColor: '#000',
   shadowOffset: { width: 0, height: 4 },
-  shadowOpacity: 0.07,
+  shadowOpacity: 0.06,
   shadowRadius: 10,
   elevation: 3,
 };
 const SOFT_SHADOW = {
   shadowColor: '#000',
   shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.05,
+  shadowOpacity: 0.04,
   shadowRadius: 6,
   elevation: 2,
+};
+
+const PALETTE = {
+  indigo: { bg: '#EEF0FF', fg: '#4F46E5', grad: ['#8B7CF6', '#4338CA'] as [string, string] },
+  teal: { bg: '#E6F7F7', fg: '#0E8A8A', grad: ['#2DD4C7', '#0F766E'] as [string, string] },
+  amber: { bg: '#FFF3E4', fg: '#B45309', grad: ['#FBBF24', '#B45309'] as [string, string] },
+  rose: { bg: '#FFF1F2', fg: '#E11D48', grad: ['#FB7185', '#BE123C'] as [string, string] },
 };
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -62,30 +75,31 @@ type Activity = {
   icon: IconName;
   bg: string;
   fg: string;
+  grad: [string, string];
   world: number;
   country: number;
   peaks: Peak[];
 };
 
 const ACTIVITIES: Activity[] = [
-  { id: 'lying', name: 'Uzanıyorum', icon: 'bed-outline', bg: '#EEF0FF', fg: '#4F46E5', world: 22, country: 30, peaks: [{ hour: 3, spread: 3.5 }] },
-  { id: 'work', name: 'İşteyim', icon: 'briefcase-outline', bg: '#EAF2FF', fg: '#2563EB', world: 18, country: 14, peaks: [{ hour: 11, spread: 4.5 }] },
-  { id: 'eat', name: 'Yemek yiyorum', icon: 'restaurant-outline', bg: '#FFF3E4', fg: '#D9730D', world: 7.5, country: 9, peaks: [{ hour: 8, spread: 1.3 }, { hour: 13, spread: 1.3 }, { hour: 19, spread: 1.3 }] },
-  { id: 'travel', name: 'Yoldayım', icon: 'car-outline', bg: '#E6F7F7', fg: '#0E8A8A', world: 8, country: 10, peaks: [{ hour: 8, spread: 1.3 }, { hour: 18, spread: 1.3 }] },
-  { id: 'study', name: 'Ders çalışıyorum', icon: 'book-outline', bg: '#FDEDF4', fg: '#C2417A', world: 6, country: 7, peaks: [{ hour: 20, spread: 4 }] },
-  { id: 'sport', name: 'Spor yapıyorum', icon: 'barbell-outline', bg: '#E9F8EC', fg: '#1F8A3E', world: 4, country: 3, peaks: [{ hour: 19, spread: 3 }] },
-  { id: 'tv', name: 'Dizi izliyorum', icon: 'tv-outline', bg: '#EEF1F5', fg: '#475569', world: 7, country: 8, peaks: [{ hour: 21, spread: 3 }] },
-  { id: 'coffee', name: 'Kahve içiyorum', icon: 'cafe-outline', bg: '#FFF1F2', fg: '#E11D48', world: 5, country: 6, peaks: [{ hour: 9, spread: 2.5 }] },
-  { id: 'gaming', name: 'Oyun oynuyorum', icon: 'game-controller-outline', bg: '#F2E9FC', fg: '#9333EA', world: 9, country: 6, peaks: [{ hour: 22, spread: 4 }] },
-  { id: 'shop', name: 'Alışveriş yapıyorum', icon: 'cart-outline', bg: '#FFF8DE', fg: '#B7860B', world: 3.5, country: 3, peaks: [{ hour: 15, spread: 4 }] },
-  { id: 'chores', name: 'Ev işi yapıyorum', icon: 'home-outline', bg: '#E8F6FB', fg: '#0B7BA3', world: 5, country: 2, peaks: [{ hour: 11, spread: 4 }] },
-  { id: 'friends', name: 'Arkadaşlarla', icon: 'people-outline', bg: '#FFECE6', fg: '#E0552F', world: 4.5, country: 2, peaks: [{ hour: 20, spread: 4 }] },
-  { id: 'nothing', name: 'Hiçbir şey yapmıyorum', icon: 'ellipsis-horizontal-outline', bg: '#F1F1F3', fg: '#52525B', world: 6, country: 5, peaks: [{ hour: 16, spread: 5 }] },
-  { id: 'bored', name: 'Sıkılıyorum', icon: 'sad-outline', bg: '#F5F0FF', fg: '#6D28D9', world: 7, country: 5, peaks: [{ hour: 15, spread: 5 }] },
-  { id: 'scrolling', name: 'Telefonda geziniyorum', icon: 'phone-portrait-outline', bg: '#ECF6FC', fg: '#1D6FA5', world: 10, country: 8, peaks: [{ hour: 22, spread: 3 }] },
-  { id: 'procrastinating', name: 'Erteliyorum', icon: 'time-outline', bg: '#FDF0F5', fg: '#9D174D', world: 8, country: 6, peaks: [{ hour: 15, spread: 4 }] },
-  { id: 'resting', name: 'Dinleniyorum', icon: 'leaf-outline', bg: '#F1F5EB', fg: '#5B7A3A', world: 8, country: 6, peaks: [{ hour: 14, spread: 5 }] },
-  { id: 'money', name: 'Borçlarımı düşünüyorum', icon: 'wallet-outline', bg: '#ECFEFF', fg: '#0891B2', world: 5, country: 4, peaks: [{ hour: 21, spread: 4 }] },
+  { id: 'lying', name: 'Uzanıyorum', icon: 'bed-outline', ...PALETTE.indigo, world: 22, country: 30, peaks: [{ hour: 3, spread: 3.5 }] },
+  { id: 'work', name: 'İşteyim', icon: 'briefcase-outline', ...PALETTE.indigo, world: 18, country: 14, peaks: [{ hour: 11, spread: 4.5 }] },
+  { id: 'eat', name: 'Yemek yiyorum', icon: 'restaurant-outline', ...PALETTE.amber, world: 7.5, country: 9, peaks: [{ hour: 8, spread: 1.3 }, { hour: 13, spread: 1.3 }, { hour: 19, spread: 1.3 }] },
+  { id: 'travel', name: 'Yoldayım', icon: 'car-outline', ...PALETTE.teal, world: 8, country: 10, peaks: [{ hour: 8, spread: 1.3 }, { hour: 18, spread: 1.3 }] },
+  { id: 'study', name: 'Ders çalışıyorum', icon: 'book-outline', ...PALETTE.indigo, world: 6, country: 7, peaks: [{ hour: 20, spread: 4 }] },
+  { id: 'sport', name: 'Spor yapıyorum', icon: 'barbell-outline', ...PALETTE.teal, world: 4, country: 3, peaks: [{ hour: 19, spread: 3 }] },
+  { id: 'tv', name: 'Dizi/film izliyorum', icon: 'tv-outline', ...PALETTE.rose, world: 7, country: 8, peaks: [{ hour: 21, spread: 3 }] },
+  { id: 'coffee', name: 'Kahve içiyorum', icon: 'cafe-outline', ...PALETTE.amber, world: 5, country: 6, peaks: [{ hour: 9, spread: 2.5 }] },
+  { id: 'gaming', name: 'Oyun oynuyorum', icon: 'game-controller-outline', ...PALETTE.rose, world: 9, country: 6, peaks: [{ hour: 22, spread: 4 }] },
+  { id: 'shop', name: 'Alışveriş yapıyorum', icon: 'cart-outline', ...PALETTE.amber, world: 3.5, country: 3, peaks: [{ hour: 15, spread: 4 }] },
+  { id: 'chores', name: 'Ev işi yapıyorum', icon: 'home-outline', ...PALETTE.teal, world: 5, country: 2, peaks: [{ hour: 11, spread: 4 }] },
+  { id: 'friends', name: 'Arkadaşlarımlayım', icon: 'people-outline', ...PALETTE.rose, world: 4.5, country: 2, peaks: [{ hour: 20, spread: 4 }] },
+  { id: 'nothing', name: 'Boş boş oturuyorum', icon: 'ellipsis-horizontal-outline', ...PALETTE.indigo, world: 6, country: 5, peaks: [{ hour: 16, spread: 5 }] },
+  { id: 'bored', name: 'Sıkılıyorum', icon: 'sad-outline', ...PALETTE.indigo, world: 7, country: 5, peaks: [{ hour: 15, spread: 5 }] },
+  { id: 'scrolling', name: 'Telefonda geziniyorum', icon: 'phone-portrait-outline', ...PALETTE.rose, world: 10, country: 8, peaks: [{ hour: 22, spread: 3 }] },
+  { id: 'procrastinating', name: 'Erteliyorum', icon: 'time-outline', ...PALETTE.indigo, world: 8, country: 6, peaks: [{ hour: 15, spread: 4 }] },
+  { id: 'resting', name: 'Dinleniyorum', icon: 'leaf-outline', ...PALETTE.teal, world: 8, country: 6, peaks: [{ hour: 14, spread: 5 }] },
+  { id: 'money', name: 'Borçları düşünüyorum', icon: 'wallet-outline', ...PALETTE.indigo, world: 5, country: 4, peaks: [{ hour: 21, spread: 4 }] },
 ];
 
 const FILTERS = [
@@ -232,7 +246,7 @@ function tap(select = false) {
 function FadeIn({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
   const o = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    Animated.timing(o, { toValue: 1, duration: 260, useNativeDriver: true }).start();
+    Animated.timing(o, { toValue: 1, duration: DUR, easing: EASE, useNativeDriver: true }).start();
   }, []);
   return <Animated.View style={[{ opacity: o }, style]}>{children}</Animated.View>;
 }
@@ -247,17 +261,11 @@ function StaggerIn({
   children: ReactNode;
 }) {
   const o = useRef(new Animated.Value(0)).current;
-  const y = useRef(new Animated.Value(12)).current;
+  const y = useRef(new Animated.Value(10)).current;
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(o, { toValue: 1, duration: 300, delay, useNativeDriver: true }),
-      Animated.timing(y, {
-        toValue: 0,
-        duration: 300,
-        delay,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
+      Animated.timing(o, { toValue: 1, duration: DUR, delay, easing: EASE, useNativeDriver: true }),
+      Animated.timing(y, { toValue: 0, duration: DUR, delay, easing: EASE, useNativeDriver: true }),
     ]).start();
   }, []);
   return (
@@ -280,7 +288,7 @@ function PressableScale({
 }) {
   const scale = useRef(new Animated.Value(1)).current;
   const to = (v: number) =>
-    Animated.spring(scale, { toValue: v, useNativeDriver: true, speed: 40, bounciness: 6 }).start();
+    Animated.timing(scale, { toValue: v, duration: DUR / 2, easing: EASE, useNativeDriver: true }).start();
   return (
     <Pressable
       onPress={onPress}
@@ -290,6 +298,105 @@ function PressableScale({
     >
       <Animated.View style={[style, { transform: [{ scale }] }]}>{children}</Animated.View>
     </Pressable>
+  );
+}
+
+// Gradyanlı, ince renkli gölgeli (ışımalı) ikon dairesi.
+function IconCircle({
+  size,
+  grad,
+  icon,
+  iconSize,
+}: {
+  size: number;
+  grad: [string, string];
+  icon: IconName;
+  iconSize: number;
+}) {
+  const gid = `g-${size}-${grad[1].slice(1)}`;
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        shadowColor: grad[1],
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.35,
+        shadowRadius: 8,
+        elevation: 5,
+      }}
+    >
+      <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <Defs>
+          <LinearGradient id={gid} x1="0" y1="0" x2={size} y2={size}>
+            <Stop offset="0" stopColor={grad[0]} />
+            <Stop offset="1" stopColor={grad[1]} />
+          </LinearGradient>
+        </Defs>
+        <Circle cx={size / 2} cy={size / 2} r={size / 2} fill={`url(#${gid})`} />
+      </Svg>
+      <View
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Ionicons name={icon} size={iconSize} color="#ffffff" />
+      </View>
+    </View>
+  );
+}
+
+// Sonuç belirdiğinde aktivitenin renginde yükselip kaybolan ince parçacıklar.
+function Sparkles({ color }: { color: string }) {
+  const positions = [
+    { x: -78, y: -6 },
+    { x: 64, y: -26 },
+    { x: -46, y: -58 },
+    { x: 44, y: 14 },
+    { x: -96, y: 34 },
+    { x: 86, y: -64 },
+  ];
+  const vals = useRef(positions.map(() => new Animated.Value(0))).current;
+  useEffect(() => {
+    const anims = vals.map((v, i) =>
+      Animated.timing(v, { toValue: 1, duration: 900, delay: i * 70, easing: EASE, useNativeDriver: true })
+    );
+    Animated.stagger(0, anims).start();
+  }, []);
+  return (
+    <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+      {vals.map((v, i) => {
+        const translateY = v.interpolate({ inputRange: [0, 1], outputRange: [0, -42] });
+        const opacity = v.interpolate({ inputRange: [0, 0.15, 0.7, 1], outputRange: [0, 1, 1, 0] });
+        const scale = v.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] });
+        const pos = positions[i];
+        return (
+          <Animated.View
+            key={i}
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: '36%',
+              marginLeft: pos.x,
+              marginTop: pos.y,
+              width: 6,
+              height: 6,
+              borderRadius: 3,
+              backgroundColor: color,
+              opacity,
+              transform: [{ translateY }, { scale }],
+            }}
+          />
+        );
+      })}
+    </View>
   );
 }
 
@@ -357,8 +464,8 @@ function Splash() {
     Animated.loop(
       Animated.timing(rot, { toValue: 1, duration: 1400, easing: Easing.linear, useNativeDriver: true })
     ).start();
-    Animated.spring(pop, { toValue: 1, useNativeDriver: true, speed: 14, bounciness: 8 }).start();
-    Animated.timing(fade, { toValue: 1, duration: 500, delay: 250, useNativeDriver: true }).start();
+    Animated.timing(pop, { toValue: 1, duration: DUR, easing: EASE, useNativeDriver: true }).start();
+    Animated.timing(fade, { toValue: 1, duration: DUR, delay: 250, easing: EASE, useNativeDriver: true }).start();
   }, []);
   const spin = rot.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
   return (
@@ -373,7 +480,7 @@ function Splash() {
           </Animated.View>
           <Globe size={104} />
         </Animated.View>
-        <Animated.View style={{ opacity: fade, marginTop: 30 }}>
+        <Animated.View style={{ opacity: fade, marginTop: SP.xxxl - SP.xs }}>
           <Text style={styles.splashQuestion}>Şu an dünyada{'\n'}kim ne yapıyor?</Text>
           <Text style={styles.splashHint}>Merak ediyorsan hemen öğren</Text>
         </Animated.View>
@@ -404,8 +511,8 @@ function CountUp({ value, color }: { value: number; color: string }) {
     anim.setValue(0);
     Animated.timing(anim, {
       toValue: value,
-      duration: 900,
-      easing: Easing.out(Easing.cubic),
+      duration: 800,
+      easing: EASE,
       useNativeDriver: false,
     }).start();
   }, [value]);
@@ -571,9 +678,9 @@ function BackgroundDecor() {
   return (
     <View style={styles.bgDecor} pointerEvents="none">
       <View style={[styles.blob, { top: -70, left: -50, width: 220, height: 220, backgroundColor: BRAND, opacity: 0.06 }]} />
-      <View style={[styles.blob, { top: 160, right: -70, width: 190, height: 190, backgroundColor: '#F59E0B', opacity: 0.05 }]} />
-      <View style={[styles.blob, { bottom: 60, left: -60, width: 210, height: 210, backgroundColor: '#10B981', opacity: 0.05 }]} />
-      <View style={[styles.blob, { bottom: -80, right: -40, width: 180, height: 180, backgroundColor: '#EC4899', opacity: 0.045 }]} />
+      <View style={[styles.blob, { top: 160, right: -70, width: 190, height: 190, backgroundColor: PALETTE.amber.fg, opacity: 0.05 }]} />
+      <View style={[styles.blob, { bottom: 60, left: -60, width: 210, height: 210, backgroundColor: PALETTE.teal.fg, opacity: 0.05 }]} />
+      <View style={[styles.blob, { bottom: -80, right: -40, width: 180, height: 180, backgroundColor: PALETTE.rose.fg, opacity: 0.045 }]} />
     </View>
   );
 }
@@ -652,6 +759,13 @@ export default function HomeScreen() {
       }
     });
   }, [selected, filter, profile, consent, refreshKey]);
+
+  const sortedActivities = useMemo(() => {
+    const hour = new Date(now).getHours();
+    return [...ACTIVITIES].sort(
+      (a, b) => timeFactor(b.peaks, hour) * b.world - timeFactor(a.peaks, hour) * a.world
+    );
+  }, [now]);
 
   function selectActivity(a: Activity) {
     tap();
@@ -750,7 +864,7 @@ export default function HomeScreen() {
   if (!splashDone) return <Splash />;
 
   if (selected) {
-    const { bg, fg } = selected;
+    const { bg, fg, grad } = selected;
     const needsProfile = filter !== 'world';
     const value = needsProfile ? profile[filter as keyof Profile] : undefined;
     const picking = needsProfile && (!value || editing);
@@ -824,9 +938,10 @@ export default function HomeScreen() {
       body = (
         <View style={styles.center}>
           <View style={styles.resultCard}>
+            <Sparkles key={filter + (isReal ? 'r' : 'e')} color={fg} />
             <View style={[styles.badge, isReal ? styles.badgeLive : styles.badgeEst]}>
               <Text style={[styles.badgeText, isReal ? styles.badgeTextLive : styles.badgeTextEst]}>
-                {isReal ? 'Canlı' : 'Tahmini'}
+                {isReal ? 'CANLI' : 'TAHMİNİ'}
               </Text>
             </View>
             <CountUp value={pct} color={fg} />
@@ -846,7 +961,7 @@ export default function HomeScreen() {
         <FadeIn style={styles.resultContainer}>
           <View style={styles.topRow}>
             <View style={styles.chip}>
-              <Ionicons name={selected.icon} size={20} color={fg} />
+              <IconCircle size={28} grad={grad} icon={selected.icon} iconSize={15} />
               <Text style={styles.chipText}>{selected.name}</Text>
             </View>
           </View>
@@ -920,12 +1035,10 @@ export default function HomeScreen() {
           <Text style={styles.subtitle}>Birine dokun, dünyayla karşılaştır.</Text>
 
           <View style={styles.grid}>
-            {ACTIVITIES.map((a, i) => (
-              <StaggerIn key={a.id} delay={i * 30} style={styles.cardWrap}>
+            {sortedActivities.map((a, i) => (
+              <StaggerIn key={a.id} delay={i * 22} style={styles.cardWrap}>
                 <PressableScale wrapStyle={styles.cardPress} style={styles.card} onPress={() => selectActivity(a)}>
-                  <View style={[styles.iconWrap, { backgroundColor: a.fg }]}>
-                    <Ionicons name={a.icon} size={22} color="#ffffff" />
-                  </View>
+                  <IconCircle size={44} grad={a.grad} icon={a.icon} iconSize={22} />
                   <Text style={styles.name} numberOfLines={2}>
                     {a.name}
                   </Text>
@@ -949,47 +1062,39 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#F7F7F9' },
   bgDecor: { ...StyleSheet.absoluteFillObject, overflow: 'hidden' },
   blob: { position: 'absolute', borderRadius: 999 },
-  container: { padding: 20, paddingBottom: 28 },
-  title: { fontFamily: F.bold, fontSize: 28, color: INK, marginTop: 8, letterSpacing: -0.5 },
+  container: { padding: SP.xl, paddingBottom: SP.xxl + SP.xs },
+  title: { fontFamily: F.bold, fontSize: FS.xxl, color: INK, marginTop: SP.sm, letterSpacing: -0.5 },
   titleAccent: { color: BRAND },
-  subtitle: { fontFamily: F.regular, fontSize: 14, color: SOFT, marginTop: 4, marginBottom: 20 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  cardWrap: { width: '31%' },
+  subtitle: { fontFamily: F.regular, fontSize: FS.base, color: SOFT, marginTop: SP.xs, marginBottom: SP.xl },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.md },
+  cardWrap: { width: '47.5%' },
   cardPress: { width: '100%' },
   card: {
     backgroundColor: '#ffffff',
-    minHeight: 120,
-    borderRadius: 22,
-    padding: 14,
+    minHeight: 108,
+    borderRadius: SP.xl,
+    padding: SP.lg,
     justifyContent: 'space-between',
     ...CARD_SHADOW,
   },
-  iconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   name: {
     fontFamily: F.bold,
-    fontSize: 12.5,
+    fontSize: FS.sm,
     color: INK,
-    lineHeight: 17,
-    minHeight: 34,
-    marginTop: 10,
+    lineHeight: 18,
+    marginTop: SP.sm,
   },
   resetLink: {
     fontFamily: F.regular,
-    fontSize: 13,
+    fontSize: FS.sm,
     color: FAINT,
     textAlign: 'center',
-    marginTop: 26,
+    marginTop: SP.xxl,
     textDecorationLine: 'underline',
   },
 
   splashSafe: { flex: 1, backgroundColor: BRAND },
-  splashCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
+  splashCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: SP.xxl + SP.sm },
   splashRingWrap: { width: 128, height: 128, alignItems: 'center', justifyContent: 'center' },
   splashRingAbs: { position: 'absolute' },
   splashQuestion: {
@@ -1001,40 +1106,40 @@ const styles = StyleSheet.create({
   },
   splashHint: {
     fontFamily: F.regular,
-    fontSize: 14,
+    fontSize: FS.base,
     color: 'rgba(255,255,255,0.75)',
     textAlign: 'center',
-    marginTop: 10,
+    marginTop: SP.sm + SP.xs,
   },
 
-  resultContainer: { flex: 1, padding: 20, paddingBottom: 16 },
+  resultContainer: { flex: 1, padding: SP.xl, paddingBottom: SP.lg },
   topRow: { flexDirection: 'row' },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: SP.sm,
     backgroundColor: '#ffffff',
     borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
+    paddingHorizontal: SP.sm + SP.xs,
+    paddingVertical: SP.xs + 2,
     ...SOFT_SHADOW,
   },
-  chipText: { fontFamily: F.bold, fontSize: 17, color: INK },
+  chipText: { fontFamily: F.bold, fontSize: FS.lg, color: INK, marginRight: SP.xs },
 
-  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 18 },
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm, marginTop: SP.xl - SP.xs },
   filterBtn: {
-    paddingVertical: 9,
-    paddingHorizontal: 16,
+    paddingVertical: SP.sm + SP.xs,
+    paddingHorizontal: SP.lg,
     borderRadius: 999,
     backgroundColor: '#ffffff',
     ...SOFT_SHADOW,
   },
-  filterText: { fontFamily: F.medium, fontSize: 14, color: SOFT },
+  filterText: { fontFamily: F.medium, fontSize: FS.base, color: SOFT },
   filterTextActive: { color: '#ffffff' },
   editLink: {
     fontFamily: F.medium,
-    fontSize: 14,
-    marginTop: 12,
+    fontSize: FS.base,
+    marginTop: SP.md,
     textDecorationLine: 'underline',
   },
 
@@ -1043,111 +1148,112 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: '#ffffff',
     borderRadius: 28,
-    paddingVertical: 34,
-    paddingHorizontal: 22,
+    paddingVertical: SP.xxxl + SP.sm,
+    paddingHorizontal: SP.xxl,
     alignItems: 'center',
+    overflow: 'hidden',
     ...CARD_SHADOW,
   },
-  badge: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4, marginBottom: 12 },
+  badge: { borderRadius: 999, paddingHorizontal: SP.md, paddingVertical: SP.xs, marginBottom: SP.md },
   badgeLive: { backgroundColor: '#E3F6E8' },
   badgeEst: { backgroundColor: '#F0F1F3' },
-  badgeText: { fontFamily: F.bold, fontSize: 12 },
+  badgeText: { fontFamily: F.bold, fontSize: FS.xs, letterSpacing: 0.6 },
   badgeTextLive: { color: '#1f7a3d' },
   badgeTextEst: { color: '#44464C' },
   line: {
     fontFamily: F.regular,
-    fontSize: 17,
+    fontSize: FS.lg,
     color: SOFT,
     textAlign: 'center',
-    marginTop: 14,
+    marginTop: SP.md + SP.xs,
     lineHeight: 24,
   },
   note: {
     fontFamily: F.regular,
-    fontSize: 12,
+    fontSize: FS.xs,
     color: FAINT,
-    marginTop: 12,
+    marginTop: SP.md,
     textAlign: 'center',
     lineHeight: 17,
   },
   primaryBtn: {
-    borderRadius: 14,
-    paddingVertical: 13,
-    paddingHorizontal: 22,
-    marginTop: 18,
+    borderRadius: SP.md + SP.xs,
+    paddingVertical: SP.md + 1,
+    paddingHorizontal: SP.xl + SP.xs,
+    marginTop: SP.lg + SP.xs,
     alignItems: 'center',
   },
-  primaryBtnText: { fontFamily: F.medium, color: '#ffffff', fontSize: 15 },
-  ghostBtn: { paddingVertical: 12, alignItems: 'center', marginTop: 4 },
-  ghostBtnText: { fontFamily: F.regular, color: SOFT, fontSize: 15 },
+  primaryBtnText: { fontFamily: F.medium, color: '#ffffff', fontSize: FS.md },
+  ghostBtn: { paddingVertical: SP.md, alignItems: 'center', marginTop: SP.xs },
+  ghostBtnText: { fontFamily: F.regular, color: SOFT, fontSize: FS.md },
 
   consentOuter: { flex: 1, justifyContent: 'center' },
   consentCard: {
     backgroundColor: '#ffffff',
     borderRadius: 28,
-    padding: 22,
+    padding: SP.xxl - SP.xs,
     ...CARD_SHADOW,
   },
-  consentText: { fontFamily: F.regular, fontSize: 15, color: '#333', lineHeight: 22, marginBottom: 10 },
+  consentText: { fontFamily: F.regular, fontSize: FS.md, color: '#333', lineHeight: 22, marginBottom: SP.sm + SP.xs },
 
   pickerOuter: {
     flex: 1,
     backgroundColor: '#ffffff',
     borderRadius: 28,
-    padding: 20,
-    marginTop: 4,
+    padding: SP.xl,
+    marginTop: SP.xs,
     ...CARD_SHADOW,
   },
-  pickerTitle: { fontFamily: F.bold, fontSize: 20, color: INK, marginBottom: 12 },
+  pickerTitle: { fontFamily: F.bold, fontSize: FS.xl, color: INK, marginBottom: SP.md },
   row: {
-    paddingVertical: 15,
-    paddingHorizontal: 16,
-    borderRadius: 14,
+    paddingVertical: SP.md + 3,
+    paddingHorizontal: SP.lg,
+    borderRadius: SP.md + 2,
     backgroundColor: '#F5F6F8',
-    marginBottom: 8,
+    marginBottom: SP.sm,
   },
-  rowText: { fontFamily: F.regular, fontSize: 16, color: INK },
+  rowText: { fontFamily: F.regular, fontSize: FS.md + 1, color: INK },
   input: {
     fontFamily: F.regular,
     backgroundColor: '#F5F6F8',
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    fontSize: 16,
-    marginBottom: 10,
+    borderRadius: SP.md + 2,
+    paddingHorizontal: SP.lg,
+    paddingVertical: SP.md + 1,
+    fontSize: FS.md + 1,
+    marginBottom: SP.sm + 2,
   },
 
-  timerBox: { marginBottom: 14, marginTop: 16 },
-  timerLabels: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
-  timerText: { fontFamily: F.regular, fontSize: 12, color: SOFT },
+  timerBox: { marginBottom: SP.md + SP.xs, marginTop: SP.lg },
+  timerLabels: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: SP.xs + 2 },
+  timerText: { fontFamily: F.regular, fontSize: FS.xs, color: SOFT },
   timerTrack: { height: 6, backgroundColor: 'rgba(255,255,255,0.8)', borderRadius: 3 },
   timerFill: { height: 6, borderRadius: 3 },
 
-  buttonsRow: { flexDirection: 'row', gap: 10 },
+  buttonsRow: { flexDirection: 'row', gap: SP.sm + 2 },
   button: {
     flex: 1,
     flexDirection: 'row',
     backgroundColor: '#ffffff',
-    borderRadius: 14,
-    paddingVertical: 15,
+    borderRadius: SP.md + 2,
+    paddingVertical: SP.md + 3,
     alignItems: 'center',
     justifyContent: 'center',
     ...SOFT_SHADOW,
   },
   shareBtn: {},
-  buttonText: { fontFamily: F.medium, fontSize: 16, color: INK },
+  buttonText: { fontFamily: F.medium, fontSize: FS.md, color: INK },
 
   shareCardWrap: { position: 'absolute', top: 0, left: 0, opacity: 0 },
   shareCard: {
     width: 320,
     height: 320,
     borderRadius: 28,
-    padding: 24,
+    padding: SP.xxl,
     justifyContent: 'space-between',
   },
   shareBrandTop: {
     fontFamily: F.bold,
-    fontSize: 15,
+    fontSize: FS.md,
     color: '#ffffff',
     textAlign: 'center',
   },
@@ -1159,24 +1265,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 10,
+    marginBottom: SP.sm + 2,
   },
   sharePct: { fontFamily: F.bold, fontSize: 56, color: '#ffffff', letterSpacing: -2 },
   shareLine: {
     fontFamily: F.medium,
-    fontSize: 14,
+    fontSize: FS.base,
     color: '#ffffff',
     lineHeight: 19,
     textAlign: 'center',
-    marginTop: 4,
-    paddingHorizontal: 8,
+    marginTop: SP.xs,
+    paddingHorizontal: SP.sm,
   },
-  shareNote: { fontFamily: F.regular, fontSize: 11, color: 'rgba(255,255,255,0.8)', marginTop: 6 },
+  shareNote: { fontFamily: F.regular, fontSize: 11, color: 'rgba(255,255,255,0.8)', marginTop: SP.xs + 2 },
   shareCta: {
     backgroundColor: '#ffffff',
     borderRadius: 999,
-    paddingVertical: 12,
+    paddingVertical: SP.md,
     alignItems: 'center',
   },
-  shareCtaText: { fontFamily: F.bold, fontSize: 14 },
+  shareCtaText: { fontFamily: F.bold, fontSize: FS.base },
 });

@@ -79,6 +79,7 @@ type Activity = {
   world: number;
   country: number;
   peaks: Peak[];
+  mood?: boolean;
 };
 
 const ACTIVITIES: Activity[] = [
@@ -94,20 +95,20 @@ const ACTIVITIES: Activity[] = [
   { id: 'shop', name: 'Alışveriş yapıyorum', icon: 'cart-outline', ...PALETTE.amber, world: 3.5, country: 3, peaks: [{ hour: 15, spread: 4 }] },
   { id: 'chores', name: 'Ev işi yapıyorum', icon: 'home-outline', ...PALETTE.teal, world: 5, country: 2, peaks: [{ hour: 11, spread: 4 }] },
   { id: 'friends', name: 'Arkadaşlarımlayım', icon: 'people-outline', ...PALETTE.rose, world: 4.5, country: 2, peaks: [{ hour: 20, spread: 4 }] },
-  { id: 'nothing', name: 'Boş boş oturuyorum', icon: 'ellipsis-horizontal-outline', ...PALETTE.indigo, world: 6, country: 5, peaks: [{ hour: 16, spread: 5 }] },
-  { id: 'bored', name: 'Sıkılıyorum', icon: 'sad-outline', ...PALETTE.indigo, world: 7, country: 5, peaks: [{ hour: 15, spread: 5 }] },
   { id: 'scrolling', name: 'Telefonda geziniyorum', icon: 'phone-portrait-outline', ...PALETTE.rose, world: 10, country: 8, peaks: [{ hour: 22, spread: 3 }] },
-  { id: 'procrastinating', name: 'Erteliyorum', icon: 'time-outline', ...PALETTE.indigo, world: 8, country: 6, peaks: [{ hour: 15, spread: 4 }] },
   { id: 'resting', name: 'Dinleniyorum', icon: 'leaf-outline', ...PALETTE.teal, world: 8, country: 6, peaks: [{ hour: 14, spread: 5 }] },
-  { id: 'money', name: 'Borçları düşünüyorum', icon: 'wallet-outline', ...PALETTE.indigo, world: 5, country: 4, peaks: [{ hour: 21, spread: 4 }] },
+  { id: 'nothing', name: 'Boş boş oturuyorum', icon: 'ellipsis-horizontal-outline', ...PALETTE.indigo, world: 6, country: 5, peaks: [{ hour: 16, spread: 5 }], mood: true },
+  { id: 'bored', name: 'Sıkılıyorum', icon: 'sad-outline', ...PALETTE.indigo, world: 7, country: 5, peaks: [{ hour: 15, spread: 5 }], mood: true },
+  { id: 'procrastinating', name: 'Erteliyorum', icon: 'time-outline', ...PALETTE.indigo, world: 8, country: 6, peaks: [{ hour: 15, spread: 4 }], mood: true },
+  { id: 'money', name: 'Borçları düşünüyorum', icon: 'wallet-outline', ...PALETTE.indigo, world: 5, country: 4, peaks: [{ hour: 21, spread: 4 }], mood: true },
 ];
 
 const FILTERS = [
   { id: 'world', label: 'Dünya' },
-  { id: 'country', label: 'Ülkem' },
-  { id: 'age', label: 'Yaşıtlarım' },
-  { id: 'city', label: 'Şehrim' },
-  { id: 'gender', label: 'Cinsiyetim' },
+  { id: 'country', label: 'Ülke' },
+  { id: 'age', label: 'Yaş' },
+  { id: 'city', label: 'Şehir' },
+  { id: 'gender', label: 'Cinsiyet' },
 ] as const;
 
 const COUNTRIES = [
@@ -203,24 +204,6 @@ function timeFactor(peaks: Peak[], hour: number) {
   return 0.5 + 1.5 * best;
 }
 
-function clampPct(n: number) {
-  return Math.max(0.5, Math.min(95, Math.round(n * 10) / 10));
-}
-
-function demoPct(base: number, seed: string) {
-  let h = 0;
-  for (const c of seed) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  const factor = 0.5 + ((h % 1000) / 1000) * 1.1;
-  return base * factor;
-}
-
-function demoFor(a: Activity, filter: FilterId, value: string | null | undefined, hour: number) {
-  const tf = timeFactor(a.peaks, hour);
-  if (filter === 'world') return clampPct(a.world * tf);
-  if (filter === 'country' && value === 'Türkiye') return clampPct(a.country * tf);
-  return clampPct(demoPct(a.world, a.id + filter + (value ?? '')) * tf);
-}
-
 function lineFor(filter: FilterId, value?: string | null) {
   switch (filter) {
     case 'world':
@@ -301,7 +284,6 @@ function PressableScale({
   );
 }
 
-// Gradyanlı, ince renkli gölgeli (ışımalı) ikon dairesi.
 function IconCircle({
   size,
   grad,
@@ -353,7 +335,6 @@ function IconCircle({
   );
 }
 
-// Sonuç belirdiğinde aktivitenin renginde yükselip kaybolan ince parçacıklar.
 function Sparkles({ color }: { color: string }) {
   const positions = [
     { x: -78, y: -6 },
@@ -638,13 +619,11 @@ function ShareCard({
   activity,
   pct,
   line,
-  isReal,
 }: {
   innerRef: React.RefObject<View>;
   activity: Activity;
   pct: number;
   line: string;
-  isReal: boolean;
 }) {
   return (
     <View style={styles.shareCardWrap} pointerEvents="none">
@@ -661,7 +640,6 @@ function ShareCard({
           </View>
           <Text style={styles.sharePct}>{formatPct(pct)}</Text>
           <Text style={styles.shareLine}>{line}</Text>
-          {!isReal ? <Text style={styles.shareNote}>Tahmini değer</Text> : null}
         </View>
 
         <View style={styles.shareCta}>
@@ -760,11 +738,14 @@ export default function HomeScreen() {
     });
   }, [selected, filter, profile, consent, refreshKey]);
 
+  // Normal aktiviteler saate göre dinamik sıralanır; ruh hali aktiviteleri hep en altta, sabit sırada kalır.
   const sortedActivities = useMemo(() => {
     const hour = new Date(now).getHours();
-    return [...ACTIVITIES].sort(
+    const main = ACTIVITIES.filter((a) => !a.mood).sort(
       (a, b) => timeFactor(b.peaks, hour) * b.world - timeFactor(a.peaks, hour) * a.world
     );
+    const mood = ACTIVITIES.filter((a) => a.mood);
+    return [...main, ...mood];
   }, [now]);
 
   function selectActivity(a: Activity) {
@@ -780,7 +761,6 @@ export default function HomeScreen() {
   }
 
   function changeActivity() {
-    clearPresence();
     setSelected(null);
     setStartedAt(null);
     setEditing(false);
@@ -871,13 +851,11 @@ export default function HomeScreen() {
     const declined = filter === 'gender' && value === NO_ANSWER && !editing;
 
     const isReal = !!ratio?.enough && typeof ratio.pct === 'number';
-    const hour = new Date(now).getHours();
-    const pct = isReal ? (ratio!.pct as number) : demoFor(selected, filter, value, hour);
+    const pct = isReal ? (ratio!.pct as number) : null;
     const shareLine = lineFor(filter, value);
 
     const elapsed = startedAt ? now - startedAt : 0;
     const remainingMin = Math.max(0, Math.ceil((SESSION_MS - elapsed) / 60000));
-    const remainingPct = Math.max(0, Math.min(100, 100 - (elapsed / SESSION_MS) * 100));
 
     let resultShown = false;
     let body;
@@ -933,23 +911,33 @@ export default function HomeScreen() {
           </View>
         </View>
       );
-    } else {
+    } else if (isReal && pct !== null) {
       resultShown = true;
       body = (
         <View style={styles.center}>
           <View style={styles.resultCard}>
-            <Sparkles key={filter + (isReal ? 'r' : 'e')} color={fg} />
-            <View style={[styles.badge, isReal ? styles.badgeLive : styles.badgeEst]}>
-              <Text style={[styles.badgeText, isReal ? styles.badgeTextLive : styles.badgeTextEst]}>
-                {isReal ? 'CANLI' : 'TAHMİNİ'}
-              </Text>
+            <Sparkles key={filter + 'r'} color={fg} />
+            <View style={[styles.badge, styles.badgeLive]}>
+              <Text style={[styles.badgeText, styles.badgeTextLive]}>CANLI</Text>
             </View>
             <CountUp value={pct} color={fg} />
             <Text style={styles.line}>{lineFor(filter, value)}</Text>
+            <Text style={styles.note}>Oran, uygulamayı kullananlar arasındadır.</Text>
+          </View>
+        </View>
+      );
+    } else {
+      body = (
+        <View style={styles.center}>
+          <View style={styles.resultCard}>
+            <View style={[styles.badge, styles.badgeEst]}>
+              <Text style={[styles.badgeText, styles.badgeTextEst]}>HENÜZ VERİ YOK</Text>
+            </View>
+            <Ionicons name="people-outline" size={40} color={fg} style={{ marginVertical: SP.md }} />
+            <Text style={styles.line}>Henüz yeterli katılım yok</Text>
             <Text style={styles.note}>
-              {isReal
-                ? 'Oran, uygulamayı kullananlar arasındadır.'
-                : 'Bu bölgede henüz yeterli aktif kullanıcı yok. Gösterilen değer, geçmiş kullanım eğilimlerine dayanan bir tahmindir.'}
+              Bu aktiviteyi seçen ilk kişilerden birisin. Birkaç kişi daha katıldığında canlı oranı
+              burada göreceksin.
             </Text>
           </View>
         </View>
@@ -966,7 +954,12 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          <View style={styles.filterRow}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterScroll}
+            contentContainerStyle={styles.filterRow}
+          >
             {FILTERS.map((f) => (
               <Pressable
                 key={f.id}
@@ -978,7 +971,7 @@ export default function HomeScreen() {
                 </Text>
               </Pressable>
             ))}
-          </View>
+          </ScrollView>
 
           {needsProfile && consent && value && !editing && !declined ? (
             <Pressable onPress={() => setEditing(true)}>
@@ -989,13 +982,13 @@ export default function HomeScreen() {
           {body}
 
           <View style={styles.timerBox}>
-            <View style={styles.timerLabels}>
-              <Text style={styles.timerText}>{remainingMin} dk sonra otomatik biter</Text>
-              <Text style={styles.timerText}>60 dk</Text>
-            </View>
+            <Text style={styles.timerText}>{remainingMin} dk sonra otomatik olarak sona erer</Text>
             <View style={styles.timerTrack}>
               <View
-                style={[styles.timerFill, { width: `${remainingPct}%`, backgroundColor: fg }]}
+                style={[
+                  styles.timerFill,
+                  { width: `${Math.max(0, Math.min(100, 100 - (elapsed / SESSION_MS) * 100))}%`, backgroundColor: fg },
+                ]}
               />
             </View>
           </View>
@@ -1014,12 +1007,14 @@ export default function HomeScreen() {
                 changeActivity();
               }}
             >
-              <Text style={styles.buttonText}>← Değiştir</Text>
+              <Text style={styles.buttonText}>← Aktivitemi değiştir</Text>
             </Pressable>
           </View>
         </FadeIn>
 
-        <ShareCard innerRef={shareRef} activity={selected} pct={pct} line={shareLine} isReal={isReal} />
+        {resultShown && pct !== null ? (
+          <ShareCard innerRef={shareRef} activity={selected} pct={pct} line={shareLine} />
+        ) : null}
       </SafeAreaView>
     );
   }
@@ -1032,7 +1027,7 @@ export default function HomeScreen() {
           <Text style={styles.title}>
             Şu an <Text style={styles.titleAccent}>SEN</Text> ne yapıyorsun?
           </Text>
-          <Text style={styles.subtitle}>Birine dokun, dünyayla karşılaştır.</Text>
+          <Text style={styles.subtitle}>Bir aktivite seç, senin gibi kaç kişi var gör.</Text>
 
           <View style={styles.grid}>
             {sortedActivities.map((a, i) => (
@@ -1126,7 +1121,8 @@ const styles = StyleSheet.create({
   },
   chipText: { fontFamily: F.bold, fontSize: FS.lg, color: INK, marginRight: SP.xs },
 
-  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm, marginTop: SP.xl - SP.xs },
+  filterScroll: { flexGrow: 0, marginTop: SP.md },
+  filterRow: { flexDirection: 'row', gap: SP.sm },
   filterBtn: {
     paddingVertical: SP.sm + SP.xs,
     paddingHorizontal: SP.lg,
@@ -1148,7 +1144,7 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: '#ffffff',
     borderRadius: 28,
-    paddingVertical: SP.xxxl + SP.sm,
+    paddingVertical: SP.xxxl - SP.xs,
     paddingHorizontal: SP.xxl,
     alignItems: 'center',
     overflow: 'hidden',
@@ -1224,8 +1220,7 @@ const styles = StyleSheet.create({
   },
 
   timerBox: { marginBottom: SP.md + SP.xs, marginTop: SP.lg },
-  timerLabels: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: SP.xs + 2 },
-  timerText: { fontFamily: F.regular, fontSize: FS.xs, color: SOFT },
+  timerText: { fontFamily: F.regular, fontSize: FS.xs, color: SOFT, marginBottom: SP.xs + 2 },
   timerTrack: { height: 6, backgroundColor: 'rgba(255,255,255,0.8)', borderRadius: 3 },
   timerFill: { height: 6, borderRadius: 3 },
 
@@ -1243,7 +1238,7 @@ const styles = StyleSheet.create({
   shareBtn: {},
   buttonText: { fontFamily: F.medium, fontSize: FS.md, color: INK },
 
-  shareCardWrap: { position: 'absolute', top: 0, left: 0, opacity: 0 },
+  shareCardWrap: { position: 'absolute', top: -10000, left: 0 },
   shareCard: {
     width: 320,
     height: 320,
@@ -1277,7 +1272,6 @@ const styles = StyleSheet.create({
     marginTop: SP.xs,
     paddingHorizontal: SP.sm,
   },
-  shareNote: { fontFamily: F.regular, fontSize: 11, color: 'rgba(255,255,255,0.8)', marginTop: SP.xs + 2 },
   shareCta: {
     backgroundColor: '#ffffff',
     borderRadius: 999,

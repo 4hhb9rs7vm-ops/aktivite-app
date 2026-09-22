@@ -16,7 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import Svg, { Circle, Path } from 'react-native-svg';
+import { Circle, Path, Svg } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import * as Localization from 'expo-localization';
 import { captureRef } from 'react-native-view-shot';
@@ -39,6 +39,21 @@ const SOFT = '#5b5b66';
 const FAINT = '#8d8d98';
 const BRAND = '#4F46E5';
 
+const CARD_SHADOW = {
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.07,
+  shadowRadius: 10,
+  elevation: 3,
+};
+const SOFT_SHADOW = {
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 2 },
+  shadowOpacity: 0.05,
+  shadowRadius: 6,
+  elevation: 2,
+};
+
 type IconName = keyof typeof Ionicons.glyphMap;
 type Peak = { hour: number; spread: number };
 type Activity = {
@@ -53,24 +68,24 @@ type Activity = {
 };
 
 const ACTIVITIES: Activity[] = [
-  { id: 'lying', name: 'Uzanıyorum', icon: 'bed-outline', bg: '#E9EAFB', fg: '#4F46E5', world: 22, country: 30, peaks: [{ hour: 3, spread: 3.5 }] },
-  { id: 'work', name: 'İşteyim', icon: 'briefcase-outline', bg: '#E6F0FE', fg: '#2563EB', world: 18, country: 14, peaks: [{ hour: 11, spread: 4.5 }] },
-  { id: 'eat', name: 'Yemek yiyorum', icon: 'restaurant-outline', bg: '#FFF1E0', fg: '#D9730D', world: 7.5, country: 9, peaks: [{ hour: 8, spread: 1.3 }, { hour: 13, spread: 1.3 }, { hour: 19, spread: 1.3 }] },
-  { id: 'travel', name: 'Yoldayım', icon: 'car-outline', bg: '#E4F5F5', fg: '#0E8A8A', world: 8, country: 10, peaks: [{ hour: 8, spread: 1.3 }, { hour: 18, spread: 1.3 }] },
-  { id: 'study', name: 'Ders çalışıyorum', icon: 'book-outline', bg: '#FDEBF3', fg: '#C2417A', world: 6, country: 7, peaks: [{ hour: 20, spread: 4 }] },
-  { id: 'sport', name: 'Spor yapıyorum', icon: 'barbell-outline', bg: '#E7F6EA', fg: '#1F8A3E', world: 4, country: 3, peaks: [{ hour: 19, spread: 3 }] },
-  { id: 'tv', name: 'Dizi izliyorum', icon: 'tv-outline', bg: '#E9EDF2', fg: '#475569', world: 7, country: 8, peaks: [{ hour: 21, spread: 3 }] },
-  { id: 'coffee', name: 'Kahve içiyorum', icon: 'cafe-outline', bg: '#F5EBE0', fg: '#8A5A2B', world: 5, country: 6, peaks: [{ hour: 9, spread: 2.5 }] },
-  { id: 'gaming', name: 'Oyun oynuyorum', icon: 'game-controller-outline', bg: '#F0E6FB', fg: '#9333EA', world: 9, country: 6, peaks: [{ hour: 22, spread: 4 }] },
-  { id: 'shop', name: 'Alışveriş yapıyorum', icon: 'cart-outline', bg: '#FFF6D9', fg: '#B7860B', world: 3.5, country: 3, peaks: [{ hour: 15, spread: 4 }] },
-  { id: 'chores', name: 'Ev işi yapıyorum', icon: 'home-outline', bg: '#E5F4F9', fg: '#0B7BA3', world: 5, country: 2, peaks: [{ hour: 11, spread: 4 }] },
-  { id: 'friends', name: 'Arkadaşlarla', icon: 'people-outline', bg: '#FFE9E4', fg: '#E0552F', world: 4.5, country: 2, peaks: [{ hour: 20, spread: 4 }] },
-  { id: 'nothing', name: 'Hiçbir şey yapmıyorum', icon: 'ellipsis-horizontal-outline', bg: '#EFEFF1', fg: '#52525B', world: 6, country: 5, peaks: [{ hour: 16, spread: 5 }] },
-  { id: 'bored', name: 'Sıkılıyorum', icon: 'sad-outline', bg: '#F3EFFF', fg: '#6D28D9', world: 7, country: 5, peaks: [{ hour: 15, spread: 5 }] },
-  { id: 'scrolling', name: 'Telefonda geziniyorum', icon: 'phone-portrait-outline', bg: '#EAF4FB', fg: '#1D6FA5', world: 10, country: 8, peaks: [{ hour: 22, spread: 3 }] },
-  { id: 'procrastinating', name: 'Erteliyorum', icon: 'time-outline', bg: '#FBEFF3', fg: '#9D174D', world: 8, country: 6, peaks: [{ hour: 15, spread: 4 }] },
-  { id: 'resting', name: 'Dinleniyorum', icon: 'leaf-outline', bg: '#EFF3E8', fg: '#5B7A3A', world: 8, country: 6, peaks: [{ hour: 14, spread: 5 }] },
-  { id: 'money', name: 'Borçlarımı düşünüyorum', icon: 'wallet-outline', bg: '#FEF6E7', fg: '#A66A00', world: 5, country: 4, peaks: [{ hour: 21, spread: 4 }] },
+  { id: 'lying', name: 'Uzanıyorum', icon: 'bed-outline', bg: '#EEF0FF', fg: '#4F46E5', world: 22, country: 30, peaks: [{ hour: 3, spread: 3.5 }] },
+  { id: 'work', name: 'İşteyim', icon: 'briefcase-outline', bg: '#EAF2FF', fg: '#2563EB', world: 18, country: 14, peaks: [{ hour: 11, spread: 4.5 }] },
+  { id: 'eat', name: 'Yemek yiyorum', icon: 'restaurant-outline', bg: '#FFF3E4', fg: '#D9730D', world: 7.5, country: 9, peaks: [{ hour: 8, spread: 1.3 }, { hour: 13, spread: 1.3 }, { hour: 19, spread: 1.3 }] },
+  { id: 'travel', name: 'Yoldayım', icon: 'car-outline', bg: '#E6F7F7', fg: '#0E8A8A', world: 8, country: 10, peaks: [{ hour: 8, spread: 1.3 }, { hour: 18, spread: 1.3 }] },
+  { id: 'study', name: 'Ders çalışıyorum', icon: 'book-outline', bg: '#FDEDF4', fg: '#C2417A', world: 6, country: 7, peaks: [{ hour: 20, spread: 4 }] },
+  { id: 'sport', name: 'Spor yapıyorum', icon: 'barbell-outline', bg: '#E9F8EC', fg: '#1F8A3E', world: 4, country: 3, peaks: [{ hour: 19, spread: 3 }] },
+  { id: 'tv', name: 'Dizi izliyorum', icon: 'tv-outline', bg: '#EEF1F5', fg: '#475569', world: 7, country: 8, peaks: [{ hour: 21, spread: 3 }] },
+  { id: 'coffee', name: 'Kahve içiyorum', icon: 'cafe-outline', bg: '#F7EEE2', fg: '#8A5A2B', world: 5, country: 6, peaks: [{ hour: 9, spread: 2.5 }] },
+  { id: 'gaming', name: 'Oyun oynuyorum', icon: 'game-controller-outline', bg: '#F2E9FC', fg: '#9333EA', world: 9, country: 6, peaks: [{ hour: 22, spread: 4 }] },
+  { id: 'shop', name: 'Alışveriş yapıyorum', icon: 'cart-outline', bg: '#FFF8DE', fg: '#B7860B', world: 3.5, country: 3, peaks: [{ hour: 15, spread: 4 }] },
+  { id: 'chores', name: 'Ev işi yapıyorum', icon: 'home-outline', bg: '#E8F6FB', fg: '#0B7BA3', world: 5, country: 2, peaks: [{ hour: 11, spread: 4 }] },
+  { id: 'friends', name: 'Arkadaşlarla', icon: 'people-outline', bg: '#FFECE6', fg: '#E0552F', world: 4.5, country: 2, peaks: [{ hour: 20, spread: 4 }] },
+  { id: 'nothing', name: 'Hiçbir şey yapmıyorum', icon: 'ellipsis-horizontal-outline', bg: '#F1F1F3', fg: '#52525B', world: 6, country: 5, peaks: [{ hour: 16, spread: 5 }] },
+  { id: 'bored', name: 'Sıkılıyorum', icon: 'sad-outline', bg: '#F5F0FF', fg: '#6D28D9', world: 7, country: 5, peaks: [{ hour: 15, spread: 5 }] },
+  { id: 'scrolling', name: 'Telefonda geziniyorum', icon: 'phone-portrait-outline', bg: '#ECF6FC', fg: '#1D6FA5', world: 10, country: 8, peaks: [{ hour: 22, spread: 3 }] },
+  { id: 'procrastinating', name: 'Erteliyorum', icon: 'time-outline', bg: '#FDF0F5', fg: '#9D174D', world: 8, country: 6, peaks: [{ hour: 15, spread: 4 }] },
+  { id: 'resting', name: 'Dinleniyorum', icon: 'leaf-outline', bg: '#F1F5EB', fg: '#5B7A3A', world: 8, country: 6, peaks: [{ hour: 14, spread: 5 }] },
+  { id: 'money', name: 'Borçlarımı düşünüyorum', icon: 'wallet-outline', bg: '#FEF8EA', fg: '#A66A00', world: 5, country: 4, peaks: [{ hour: 21, spread: 4 }] },
 ];
 
 const FILTERS = [
@@ -222,6 +237,36 @@ function FadeIn({ children, style }: { children: ReactNode; style?: StyleProp<Vi
   return <Animated.View style={[{ opacity: o }, style]}>{children}</Animated.View>;
 }
 
+function StaggerIn({
+  delay,
+  style,
+  children,
+}: {
+  delay: number;
+  style?: StyleProp<ViewStyle>;
+  children: ReactNode;
+}) {
+  const o = useRef(new Animated.Value(0)).current;
+  const y = useRef(new Animated.Value(12)).current;
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(o, { toValue: 1, duration: 300, delay, useNativeDriver: true }),
+      Animated.timing(y, {
+        toValue: 0,
+        duration: 300,
+        delay,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
+  return (
+    <Animated.View style={[style, { opacity: o, transform: [{ translateY: y }] }]}>
+      {children}
+    </Animated.View>
+  );
+}
+
 function PressableScale({
   onPress,
   wrapStyle,
@@ -245,23 +290,6 @@ function PressableScale({
     >
       <Animated.View style={[style, { transform: [{ scale }] }]}>{children}</Animated.View>
     </Pressable>
-  );
-}
-
-function Buddy({ color, size = 22 }: { color: string; size?: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24">
-      <Circle cx="12" cy="12" r="11" fill={color} />
-      <Circle cx="9.5" cy="10.5" r="1.3" fill="#ffffff" />
-      <Circle cx="14.5" cy="10.5" r="1.3" fill="#ffffff" />
-      <Path
-        d="M9 14 Q12 16.5 15 14"
-        stroke="#ffffff"
-        strokeWidth={1.4}
-        strokeLinecap="round"
-        fill="none"
-      />
-    </Svg>
   );
 }
 
@@ -298,8 +326,8 @@ function Splash() {
   );
 }
 
-const BIG = 88;
-const BIG_H = 108;
+const BIG = 84;
+const BIG_H = 104;
 
 function charWidth(ch: string) {
   if (ch >= '0' && ch <= '9') return BIG * 0.66;
@@ -364,7 +392,7 @@ function OptionPicker({
   onPick: (v: string) => void;
 }) {
   return (
-    <View style={[styles.picker, { flex: 1 }]}>
+    <View style={styles.pickerOuter}>
       <Text style={styles.pickerTitle}>{title}</Text>
       <ScrollView>
         {options.map((o) => (
@@ -389,7 +417,7 @@ function CityPicker({ onPick }: { onPick: (c: string) => void }) {
   const query = q.toLocaleLowerCase('tr-TR');
   const list = CITIES.filter((c) => c.toLocaleLowerCase('tr-TR').includes(query));
   return (
-    <View style={[styles.picker, { flex: 1 }]}>
+    <View style={styles.pickerOuter}>
       <Text style={styles.pickerTitle}>Hangi ilde yaşıyorsun?</Text>
       <TextInput style={styles.input} placeholder="İl ara" value={q} onChangeText={setQ} />
       <ScrollView keyboardShouldPersistTaps="handled">
@@ -420,22 +448,24 @@ function ConsentCard({
   onDecline: () => void;
 }) {
   return (
-    <View style={styles.consent}>
-      <Text style={styles.pickerTitle}>Karşılaştırma için bilgi paylaşımı</Text>
-      <Text style={styles.consentText}>
-        Ülke, yaş aralığı, şehir ve cinsiyet bilgilerin, seçtiğin aktivite ile birlikte anonim
-        olarak sunucuya gönderilir. Adın, e-postan ya da telefon numaran istenmez.
-      </Text>
-      <Text style={styles.consentText}>
-        Bilgilerin yalnızca oranları hesaplamak için kullanılır ve aktivitenin geçerli olduğu 60
-        dakika boyunca hesaba katılır. İstediğin zaman ana ekrandan silebilirsin.
-      </Text>
-      <Pressable style={[styles.primaryBtn, { backgroundColor: fg }]} onPress={onAccept}>
-        <Text style={styles.primaryBtnText}>Kabul ediyorum</Text>
-      </Pressable>
-      <Pressable style={styles.ghostBtn} onPress={onDecline}>
-        <Text style={styles.ghostBtnText}>Şimdi değil</Text>
-      </Pressable>
+    <View style={styles.consentOuter}>
+      <View style={styles.consentCard}>
+        <Text style={styles.pickerTitle}>Karşılaştırma için bilgi paylaşımı</Text>
+        <Text style={styles.consentText}>
+          Ülke, yaş aralığı, şehir ve cinsiyet bilgilerin, seçtiğin aktivite ile birlikte anonim
+          olarak sunucuya gönderilir. Adın, e-postan ya da telefon numaran istenmez.
+        </Text>
+        <Text style={styles.consentText}>
+          Bilgilerin yalnızca oranları hesaplamak için kullanılır ve aktivitenin geçerli olduğu 60
+          dakika boyunca hesaba katılır. İstediğin zaman ana ekrandan silebilirsin.
+        </Text>
+        <Pressable style={[styles.primaryBtn, { backgroundColor: fg }]} onPress={onAccept}>
+          <Text style={styles.primaryBtnText}>Kabul ediyorum</Text>
+        </Pressable>
+        <Pressable style={styles.ghostBtn} onPress={onDecline}>
+          <Text style={styles.ghostBtnText}>Şimdi değil</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -718,37 +748,43 @@ export default function HomeScreen() {
     } else if (declined) {
       body = (
         <View style={styles.center}>
-          <Text style={styles.line}>Cinsiyetini belirtmediğin için bu filtre kapalı.</Text>
-          <Pressable
-            style={[styles.primaryBtn, { backgroundColor: fg }]}
-            onPress={() => setEditing(true)}
-          >
-            <Text style={styles.primaryBtnText}>Cinsiyetimi seç</Text>
-          </Pressable>
+          <View style={styles.resultCard}>
+            <Text style={styles.line}>Cinsiyetini belirtmediğin için bu filtre kapalı.</Text>
+            <Pressable
+              style={[styles.primaryBtn, { backgroundColor: fg }]}
+              onPress={() => setEditing(true)}
+            >
+              <Text style={styles.primaryBtnText}>Cinsiyetimi seç</Text>
+            </Pressable>
+          </View>
         </View>
       );
     } else if (loading) {
       body = (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color={fg} />
+          <View style={styles.resultCard}>
+            <ActivityIndicator size="large" color={fg} />
+          </View>
         </View>
       );
     } else {
       resultShown = true;
       body = (
         <View style={styles.center}>
-          <View style={[styles.badge, isReal ? styles.badgeLive : styles.badgeEst]}>
-            <Text style={[styles.badgeText, isReal ? styles.badgeTextLive : styles.badgeTextEst]}>
-              {isReal ? 'Canlı' : 'Tahmini'}
+          <View style={styles.resultCard}>
+            <View style={[styles.badge, isReal ? styles.badgeLive : styles.badgeEst]}>
+              <Text style={[styles.badgeText, isReal ? styles.badgeTextLive : styles.badgeTextEst]}>
+                {isReal ? 'Canlı' : 'Tahmini'}
+              </Text>
+            </View>
+            <CountUp value={pct} color={fg} />
+            <Text style={styles.line}>{lineFor(filter, value)}</Text>
+            <Text style={styles.note}>
+              {isReal
+                ? 'Oran, uygulamayı kullananlar arasındadır.'
+                : 'Bu bölgede henüz yeterli aktif kullanıcı yok. Gösterilen değer, geçmiş kullanım eğilimlerine dayanan bir tahmindir.'}
             </Text>
           </View>
-          <CountUp value={pct} color={fg} />
-          <Text style={styles.line}>{lineFor(filter, value)}</Text>
-          <Text style={styles.note}>
-            {isReal
-              ? 'Oran, uygulamayı kullananlar arasındadır.'
-              : 'Bu bölgede henüz yeterli aktif kullanıcı yok. Gösterilen değer, geçmiş kullanım eğilimlerine dayanan bir tahmindir.'}
-          </Text>
         </View>
       );
     }
@@ -834,25 +870,17 @@ export default function HomeScreen() {
           <Text style={styles.subtitle}>Birine dokun, dünyayla karşılaştır.</Text>
 
           <View style={styles.grid}>
-            {ACTIVITIES.map((a) => (
-              <PressableScale
-                key={a.id}
-                wrapStyle={styles.cardWrap}
-                style={styles.card}
-                onPress={() => selectActivity(a)}
-              >
-                <View style={styles.iconStack}>
-                  <View style={[styles.iconWrap, { backgroundColor: a.bg }]}>
-                    <Ionicons name={a.icon} size={18} color={a.fg} />
+            {ACTIVITIES.map((a, i) => (
+              <StaggerIn key={a.id} delay={i * 30} style={styles.cardWrap}>
+                <PressableScale wrapStyle={styles.cardPress} style={styles.card} onPress={() => selectActivity(a)}>
+                  <View style={[styles.iconWrap, { backgroundColor: a.fg }]}>
+                    <Ionicons name={a.icon} size={22} color="#ffffff" />
                   </View>
-                  <View style={styles.miniBuddy}>
-                    <Buddy color={a.fg} size={13} />
-                  </View>
-                </View>
-                <Text style={styles.name} numberOfLines={2}>
-                  {a.name}
-                </Text>
-              </PressableScale>
+                  <Text style={styles.name} numberOfLines={2}>
+                    {a.name}
+                  </Text>
+                </PressableScale>
+              </StaggerIn>
             ))}
           </View>
 
@@ -868,50 +896,43 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#ffffff' },
-  container: { padding: 18, paddingBottom: 28 },
+  safe: { flex: 1, backgroundColor: '#F7F7F9' },
+  container: { padding: 20, paddingBottom: 28 },
   title: { fontFamily: F.bold, fontSize: 28, color: INK, marginTop: 8, letterSpacing: -0.5 },
   titleAccent: { color: BRAND },
-  subtitle: { fontFamily: F.regular, fontSize: 14, color: SOFT, marginTop: 4, marginBottom: 18 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  cardWrap: { width: '31.5%' },
+  subtitle: { fontFamily: F.regular, fontSize: 14, color: SOFT, marginTop: 4, marginBottom: 20 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  cardWrap: { width: '31%' },
+  cardPress: { width: '100%' },
   card: {
-    height: 104,
-    borderRadius: 16,
-    padding: 10,
+    backgroundColor: '#ffffff',
+    minHeight: 120,
+    borderRadius: 22,
+    padding: 14,
     justifyContent: 'space-between',
-    backgroundColor: '#F5F6F8',
+    ...CARD_SHADOW,
   },
-  iconStack: { position: 'relative', width: 34, height: 34 },
   iconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  miniBuddy: {
-    position: 'absolute',
-    right: -3,
-    bottom: -3,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: '#F5F6F8',
-    overflow: 'hidden',
   },
   name: {
     fontFamily: F.bold,
     fontSize: 12.5,
     color: INK,
     lineHeight: 17,
-    minHeight: 36,
+    minHeight: 34,
+    marginTop: 10,
   },
   resetLink: {
     fontFamily: F.regular,
     fontSize: 13,
     color: FAINT,
     textAlign: 'center',
-    marginTop: 24,
+    marginTop: 26,
     textDecorationLine: 'underline',
   },
 
@@ -944,6 +965,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 8,
+    ...SOFT_SHADOW,
   },
   chipText: { fontFamily: F.medium, fontSize: 14 },
 
@@ -952,7 +974,8 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     paddingHorizontal: 16,
     borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.7)',
+    backgroundColor: '#ffffff',
+    ...SOFT_SHADOW,
   },
   filterText: { fontFamily: F.medium, fontSize: 14, color: SOFT },
   filterTextActive: { color: '#ffffff' },
@@ -964,7 +987,16 @@ const styles = StyleSheet.create({
   },
 
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  badge: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4, marginBottom: 10 },
+  resultCard: {
+    width: '100%',
+    backgroundColor: '#ffffff',
+    borderRadius: 28,
+    paddingVertical: 34,
+    paddingHorizontal: 22,
+    alignItems: 'center',
+    ...CARD_SHADOW,
+  },
+  badge: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4, marginBottom: 12 },
   badgeLive: { backgroundColor: '#E3F6E8' },
   badgeEst: { backgroundColor: '#F0F1F3' },
   badgeText: { fontFamily: F.bold, fontSize: 12 },
@@ -975,8 +1007,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: SOFT,
     textAlign: 'center',
-    marginTop: 12,
-    paddingHorizontal: 20,
+    marginTop: 14,
     lineHeight: 24,
   },
   note: {
@@ -985,7 +1016,6 @@ const styles = StyleSheet.create({
     color: FAINT,
     marginTop: 12,
     textAlign: 'center',
-    paddingHorizontal: 24,
     lineHeight: 17,
   },
   primaryBtn: {
@@ -999,22 +1029,35 @@ const styles = StyleSheet.create({
   ghostBtn: { paddingVertical: 12, alignItems: 'center', marginTop: 4 },
   ghostBtnText: { fontFamily: F.regular, color: SOFT, fontSize: 15 },
 
-  consent: { flex: 1, paddingTop: 16 },
+  consentOuter: { flex: 1, justifyContent: 'center' },
+  consentCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 28,
+    padding: 22,
+    ...CARD_SHADOW,
+  },
   consentText: { fontFamily: F.regular, fontSize: 15, color: '#333', lineHeight: 22, marginBottom: 10 },
 
-  picker: { paddingTop: 16, paddingBottom: 8 },
+  pickerOuter: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    borderRadius: 28,
+    padding: 20,
+    marginTop: 4,
+    ...CARD_SHADOW,
+  },
   pickerTitle: { fontFamily: F.bold, fontSize: 20, color: INK, marginBottom: 12 },
   row: {
     paddingVertical: 15,
     paddingHorizontal: 16,
     borderRadius: 14,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#F5F6F8',
     marginBottom: 8,
   },
   rowText: { fontFamily: F.regular, fontSize: 16, color: INK },
   input: {
     fontFamily: F.regular,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#F5F6F8',
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 13,
@@ -1022,7 +1065,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
 
-  timerBox: { marginBottom: 14, marginTop: 8 },
+  timerBox: { marginBottom: 14, marginTop: 16 },
   timerLabels: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   timerText: { fontFamily: F.regular, fontSize: 12, color: SOFT },
   timerTrack: { height: 6, backgroundColor: 'rgba(255,255,255,0.8)', borderRadius: 3 },
@@ -1035,6 +1078,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 15,
     alignItems: 'center',
+    ...SOFT_SHADOW,
   },
   shareBtn: { flexDirection: 'row', justifyContent: 'center' },
   buttonText: { fontFamily: F.medium, fontSize: 16, color: INK },

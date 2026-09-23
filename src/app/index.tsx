@@ -16,7 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Circle, Defs, LinearGradient, Path, Rect, Stop, Svg } from 'react-native-svg';
+import { Circle, Defs, LinearGradient, Rect, Stop, Svg } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import * as Localization from 'expo-localization';
 import { captureRef } from 'react-native-view-shot';
@@ -31,6 +31,7 @@ import { supabase } from '@/lib/supabase';
 
 const SESSION_MS = 60 * 60 * 1000;
 const APP_NAME = 'Kim Ne Yapıyor?';
+const INSTA_HANDLE = '@suan.app';
 const SPLASH_MS = 3500;
 
 const F = { regular: 'DMSans_400Regular', medium: 'DMSans_500Medium', bold: 'DMSans_700Bold' };
@@ -38,6 +39,7 @@ const INK = '#16161a';
 const SOFT = '#5b5b66';
 const FAINT = '#8d8d98';
 const BRAND = '#4F46E5';
+const LOGO_NAVY = '#0F2A52';
 
 const SP = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, xxxl: 32 };
 const FS = { xs: 12, sm: 13, base: 14, md: 15, lg: 17, xl: 20, xxl: 28 };
@@ -106,8 +108,8 @@ const ACTIVITIES: Activity[] = [
 const FILTERS = [
   { id: 'world', label: 'Dünya' },
   { id: 'country', label: 'Ülke' },
-  { id: 'age', label: 'Yaş' },
   { id: 'city', label: 'Şehir' },
+  { id: 'age', label: 'Yaş' },
   { id: 'gender', label: 'Cinsiyet' },
 ] as const;
 
@@ -381,28 +383,100 @@ function Sparkles({ color }: { color: string }) {
   );
 }
 
-function Globe({ size = 96 }: { size?: number }) {
+const LOGO_POINTS: { x: number; y: number; big?: boolean }[] = [
+  { x: 120, y: 92 },
+  { x: 158, y: 70 },
+  { x: 200, y: 64 },
+  { x: 242, y: 76 },
+  { x: 272, y: 106 },
+  { x: 282, y: 146 },
+  { x: 266, y: 184 },
+  { x: 238, y: 214 },
+  { x: 214, y: 246 },
+  { x: 200, y: 280 },
+  { x: 200, y: 320, big: true },
+];
+const LOGO_BOX = 380;
+const LOGO_CANVAS = 176;
+const LOGO_SCALE = LOGO_CANVAS / LOGO_BOX;
+
+function SplashLogo() {
+  const anims = useRef(LOGO_POINTS.map(() => new Animated.Value(0))).current;
+  const pulse = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const seq = anims.map((v, i) =>
+      Animated.spring(v, {
+        toValue: 1,
+        useNativeDriver: true,
+        delay: i * 65,
+        speed: 14,
+        bounciness: 9,
+      })
+    );
+    Animated.stagger(0, seq).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 1400, easing: EASE, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 1400, easing: EASE, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+
+  const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1.06] });
+  const pulseOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.16, 0.32] });
+
   return (
-    <Svg width={size} height={size} viewBox="0 0 100 100">
-      <Circle cx={50} cy={50} r={46} fill="#3B7DE8" />
-      <Path
-        d="M14 38 Q24 26 38 30 Q46 20 58 26 Q70 22 78 32 Q82 40 74 46 Q66 42 58 46 Q50 40 40 46 Q30 44 24 50 Q16 46 14 38 Z"
-        fill="#3CB878"
+    <View style={{ width: LOGO_CANVAS, height: LOGO_CANVAS }}>
+      <Animated.View
+        style={{
+          position: 'absolute',
+          width: LOGO_CANVAS,
+          height: LOGO_CANVAS,
+          borderRadius: LOGO_CANVAS / 2,
+          backgroundColor: '#ffffff',
+          opacity: pulseOpacity,
+          transform: [{ scale: pulseScale }],
+        }}
       />
-      <Path
-        d="M20 62 Q30 56 40 62 Q50 58 58 66 Q52 78 40 76 Q26 80 20 62 Z"
-        fill="#3CB878"
-      />
-      <Path
-        d="M68 58 Q78 54 84 62 Q80 70 70 68 Q64 64 68 58 Z"
-        fill="#3CB878"
-      />
-      <Circle cx={50} cy={50} r={46} stroke="#ffffff" strokeOpacity={0.3} strokeWidth={1.2} fill="none" />
-      <Path d="M4 50 A46 15 0 0 0 96 50" stroke="#ffffff" strokeOpacity={0.28} strokeWidth={1} fill="none" />
-      <Path d="M4 50 A46 15 0 0 1 96 50" stroke="#ffffff" strokeOpacity={0.28} strokeWidth={1} fill="none" />
-      <Path d="M50 4 A46 46 0 0 1 50 96" stroke="#ffffff" strokeOpacity={0.22} strokeWidth={1} fill="none" />
-      <Circle cx={36} cy={32} r={16} fill="#ffffff" opacity={0.16} />
-    </Svg>
+      {LOGO_POINTS.map((p, i) => {
+        const v = anims[i];
+        const angle = (i / LOGO_POINTS.length) * Math.PI * 2;
+        const fromX = Math.cos(angle) * 130;
+        const fromY = Math.sin(angle) * 130;
+        const translateX = v.interpolate({ inputRange: [0, 1], outputRange: [fromX, 0] });
+        const translateY = v.interpolate({ inputRange: [0, 1], outputRange: [fromY, 0] });
+        const opacity = v.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0, 1, 1] });
+        const iconSize = (p.big ? 30 : 20) * LOGO_SCALE * 2.1;
+        const left = p.x * LOGO_SCALE - iconSize / 2;
+        const top = p.y * LOGO_SCALE - iconSize / 2;
+        return (
+          <Animated.View
+            key={i}
+            style={{
+              position: 'absolute',
+              left,
+              top,
+              opacity,
+              transform: [{ translateX }, { translateY }],
+            }}
+          >
+            <Ionicons name="person" size={iconSize} color="#ffffff" />
+          </Animated.View>
+        );
+      })}
+    </View>
+  );
+}
+
+function MiniLogoMark({ color = '#ffffff', size = 16 }: { color?: string; size?: number }) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 2 }}>
+      <Ionicons name="person" size={size * 0.72} color={color} style={{ opacity: 0.6 }} />
+      <Ionicons name="person" size={size} color={color} />
+      <Ionicons name="person" size={size * 0.72} color={color} style={{ opacity: 0.6 }} />
+    </View>
   );
 }
 
@@ -438,30 +512,15 @@ function InstaBadge({ size = 22 }: { size?: number }) {
 }
 
 function Splash() {
-  const rot = useRef(new Animated.Value(0)).current;
   const fade = useRef(new Animated.Value(0)).current;
-  const pop = useRef(new Animated.Value(0.85)).current;
   useEffect(() => {
-    Animated.loop(
-      Animated.timing(rot, { toValue: 1, duration: 1400, easing: Easing.linear, useNativeDriver: true })
-    ).start();
-    Animated.timing(pop, { toValue: 1, duration: DUR, easing: EASE, useNativeDriver: true }).start();
-    Animated.timing(fade, { toValue: 1, duration: DUR, delay: 250, easing: EASE, useNativeDriver: true }).start();
+    Animated.timing(fade, { toValue: 1, duration: DUR, delay: 1300, easing: EASE, useNativeDriver: true }).start();
   }, []);
-  const spin = rot.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
   return (
     <SafeAreaView style={styles.splashSafe}>
       <View style={styles.splashCenter}>
-        <Animated.View style={[styles.splashRingWrap, { transform: [{ scale: pop }] }]}>
-          <Animated.View style={[styles.splashRingAbs, { transform: [{ rotate: spin }] }]}>
-            <Svg width={128} height={128} viewBox="0 0 128 128">
-              <Circle cx={64} cy={64} r={58} stroke="#ffffff" strokeWidth={4} strokeOpacity={0.22} fill="none" />
-              <Path d="M64 6 A58 58 0 0 1 122 64" stroke="#ffffff" strokeWidth={4} strokeLinecap="round" fill="none" />
-            </Svg>
-          </Animated.View>
-          <Globe size={104} />
-        </Animated.View>
-        <Animated.View style={{ opacity: fade, marginTop: SP.xxxl - SP.xs }}>
+        <SplashLogo />
+        <Animated.View style={{ opacity: fade, marginTop: SP.xxl }}>
           <Text style={styles.splashQuestion}>Şu an dünyada{'\n'}kim ne yapıyor?</Text>
           <Text style={styles.splashHint}>Merak ediyorsan hemen öğren</Text>
         </Animated.View>
@@ -632,7 +691,10 @@ function ShareCard({
         collapsable={false}
         style={[styles.shareCard, { backgroundColor: activity.fg }]}
       >
-        <Text style={styles.shareBrandTop}>{APP_NAME}</Text>
+        <View style={styles.shareBrandRow}>
+          <MiniLogoMark size={14} />
+          <Text style={styles.shareBrandTop}>{APP_NAME}</Text>
+        </View>
 
         <View style={styles.shareMiddle}>
           <View style={styles.shareIconWrap}>
@@ -643,9 +705,8 @@ function ShareCard({
         </View>
 
         <View style={styles.shareCta}>
-          <Text style={[styles.shareCtaText, { color: activity.fg }]}>
-            Uygulamayı indir → Sen de dene
-          </Text>
+          <Text style={[styles.shareCtaText, { color: activity.fg }]}>Sen de dene</Text>
+          <Text style={[styles.shareCtaHandle, { color: activity.fg }]}>{INSTA_HANDLE}</Text>
         </View>
       </View>
     </View>
@@ -738,7 +799,6 @@ export default function HomeScreen() {
     });
   }, [selected, filter, profile, consent, refreshKey]);
 
-  // Normal aktiviteler saate göre dinamik sıralanır; ruh hali aktiviteleri hep en altta, sabit sırada kalır.
   const sortedActivities = useMemo(() => {
     const hour = new Date(now).getHours();
     const main = ACTIVITIES.filter((a) => !a.mood).sort(
@@ -954,12 +1014,7 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.filterScroll}
-            contentContainerStyle={styles.filterRow}
-          >
+          <View style={styles.filterRow}>
             {FILTERS.map((f) => (
               <Pressable
                 key={f.id}
@@ -971,7 +1026,7 @@ export default function HomeScreen() {
                 </Text>
               </Pressable>
             ))}
-          </ScrollView>
+          </View>
 
           {needsProfile && consent && value && !editing && !declined ? (
             <Pressable onPress={() => setEditing(true)}>
@@ -997,7 +1052,7 @@ export default function HomeScreen() {
             {resultShown ? (
               <Pressable style={[styles.button, styles.shareBtn]} onPress={shareResult}>
                 <InstaBadge size={20} />
-                <Text style={styles.buttonText}>Paylaş</Text>
+                <Text style={styles.buttonText}>Instada paylaş</Text>
               </Pressable>
             ) : null}
             <Pressable
@@ -1088,10 +1143,8 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
   },
 
-  splashSafe: { flex: 1, backgroundColor: BRAND },
+  splashSafe: { flex: 1, backgroundColor: LOGO_NAVY },
   splashCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: SP.xxl + SP.sm },
-  splashRingWrap: { width: 128, height: 128, alignItems: 'center', justifyContent: 'center' },
-  splashRingAbs: { position: 'absolute' },
   splashQuestion: {
     fontFamily: F.bold,
     fontSize: 24,
@@ -1121,8 +1174,7 @@ const styles = StyleSheet.create({
   },
   chipText: { fontFamily: F.bold, fontSize: FS.lg, color: INK, marginRight: SP.xs },
 
-  filterScroll: { flexGrow: 0, marginTop: SP.md },
-  filterRow: { flexDirection: 'row', gap: SP.sm },
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm, marginTop: SP.xl - SP.xs },
   filterBtn: {
     paddingVertical: SP.sm + SP.xs,
     paddingHorizontal: SP.lg,
@@ -1246,11 +1298,11 @@ const styles = StyleSheet.create({
     padding: SP.xxl,
     justifyContent: 'space-between',
   },
+  shareBrandRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SP.xs },
   shareBrandTop: {
     fontFamily: F.bold,
     fontSize: FS.md,
     color: '#ffffff',
-    textAlign: 'center',
   },
   shareMiddle: { alignItems: 'center' },
   shareIconWrap: {
@@ -1278,5 +1330,6 @@ const styles = StyleSheet.create({
     paddingVertical: SP.md,
     alignItems: 'center',
   },
-  shareCtaText: { fontFamily: F.bold, fontSize: FS.base },
+  shareCtaText: { fontFamily: F.medium, fontSize: 13 },
+  shareCtaHandle: { fontFamily: F.bold, fontSize: FS.base, marginTop: 1 },
 });

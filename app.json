@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "aktivite-app",
+    "name": "Şu An",
     "slug": "aktivite-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,7 +9,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/images/icon.png",
-      "bundleIdentifier": "com.tvfksnl.aktiviteapp"
+      "bundleIdentifier": "com.tvfk.aktiviteapp"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +18,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.tvfksnl.aktiviteapp"
+      "package": "com.tvfk.aktiviteapp"
     },
     "web": {
       "output": "static",
@@ -36,7 +36,14 @@
       ],
       "expo-font",
       "expo-localization",
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/android-icon-monochrome.png",
+          "color": "#0F2A52"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -1,9 +1,11 @@
-import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { ComponentType, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Animated,
   Easing,
+  Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleProp,
@@ -13,10 +15,42 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Circle, Defs, LinearGradient, Rect, Stop, Svg } from 'react-native-svg';
+import { Defs, LinearGradient, RadialGradient, Rect, Stop, Svg } from 'react-native-svg';
+import {
+  Armchair,
+  Barbell,
+  Bed,
+  BookOpen,
+  BellRinging,
+  Briefcase,
+  Broom,
+  Cake,
+  Car,
+  Coffee,
+  CookingPot,
+  DeviceMobile,
+  FlowerLotus,
+  Flag,
+  ForkKnife,
+  GameController,
+  GenderIntersex,
+  GlobeHemisphereEast,
+  HeartBreak,
+  Hourglass,
+  Leaf,
+  MapPin,
+  ShoppingCart,
+  Smiley,
+  SmileyAngry,
+  SmileySad,
+  Television,
+  UsersThree,
+  Wallet,
+} from 'phosphor-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Localization from 'expo-localization';
 import { captureRef } from 'react-native-view-shot';
@@ -28,11 +62,46 @@ import {
   useFonts,
 } from '@expo-google-fonts/dm-sans';
 import { supabase } from '@/lib/supabase';
+import {
+  activityName,
+  COUNTRY_TR,
+  countryFromRegion,
+  countryLabel,
+  countryOptions,
+  dayPart,
+  formatCount,
+  formatPct,
+  GENDER_VALUES,
+  genderLabel,
+  Lang,
+  loadLang,
+  momentLabel,
+  ratioLine,
+  saveLang,
+  STRINGS,
+  Strings,
+} from '@/lib/i18n';
+import { buildStory, Story } from '@/lib/shareCard';
+import {
+  getTodayMoment,
+  hasNotificationPermission,
+  requestNotificationPermission,
+  scheduleDailyMoments,
+} from '@/lib/notifications';
 
 const SESSION_MS = 60 * 60 * 1000;
-const APP_NAME = 'Kim Ne Yapıyor?';
 const INSTA_HANDLE = '@suan.app';
 const SPLASH_MS = 3500;
+const PRIVACY_URLS: Record<Lang, string> = {
+  tr: 'https://4hhb9rs7vm-ops.github.io/aktivite-app/gizlilik/',
+  en: 'https://4hhb9rs7vm-ops.github.io/aktivite-app/privacy/',
+};
+const DASHBOARD_THRESHOLD = 5000;
+const ACTIVE_COUNT_POLL_MS = 45 * 1000;
+const HERO_COUNT_THRESHOLD = 1000; // Bu sayının üstünde aktif kişi sayısı gösterilir
+const RATIO_POLL_MS = 40 * 1000; // Veri yokken oran bu aralıkla yeniden kontrol edilir
+const NOTIF_ASKED_KEY = 'notif_asked_v2';
+const NOTIF_ASK_DELAY_MS = 2500;
 
 const F = { regular: 'DMSans_400Regular', medium: 'DMSans_500Medium', bold: 'DMSans_700Bold' };
 const INK = '#16161a';
@@ -54,6 +123,14 @@ const CARD_SHADOW = {
   shadowRadius: 10,
   elevation: 3,
 };
+// Ekranı tamamen kaplayan katman (StyleSheet.absoluteFillObject yerine, her sürümde çalışır)
+const ABS_FILL = {
+  position: 'absolute' as const,
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+};
 const SOFT_SHADOW = {
   shadowColor: '#000',
   shadowOffset: { width: 0, height: 2 },
@@ -69,12 +146,16 @@ const PALETTE = {
   rose: { bg: '#FFF1F2', fg: '#E11D48', grad: ['#FB7185', '#BE123C'] as [string, string] },
 };
 
-type IconName = keyof typeof Ionicons.glyphMap;
+type PhIcon = ComponentType<{
+  size?: number;
+  color?: string;
+  weight?: 'thin' | 'light' | 'regular' | 'bold' | 'fill' | 'duotone';
+}>;
 type Peak = { hour: number; spread: number };
 type Activity = {
   id: string;
   name: string;
-  icon: IconName;
+  icon: PhIcon;
   bg: string;
   fg: string;
   grad: [string, string];
@@ -85,25 +166,32 @@ type Activity = {
 };
 
 const ACTIVITIES: Activity[] = [
-  { id: 'lying', name: 'Uzanıyorum', icon: 'bed-outline', ...PALETTE.indigo, world: 22, country: 30, peaks: [{ hour: 3, spread: 3.5 }] },
-  { id: 'work', name: 'İşteyim', icon: 'briefcase-outline', ...PALETTE.indigo, world: 18, country: 14, peaks: [{ hour: 11, spread: 4.5 }] },
-  { id: 'eat', name: 'Yemek yiyorum', icon: 'restaurant-outline', ...PALETTE.amber, world: 7.5, country: 9, peaks: [{ hour: 8, spread: 1.3 }, { hour: 13, spread: 1.3 }, { hour: 19, spread: 1.3 }] },
-  { id: 'travel', name: 'Yoldayım', icon: 'car-outline', ...PALETTE.teal, world: 8, country: 10, peaks: [{ hour: 8, spread: 1.3 }, { hour: 18, spread: 1.3 }] },
-  { id: 'study', name: 'Ders çalışıyorum', icon: 'book-outline', ...PALETTE.indigo, world: 6, country: 7, peaks: [{ hour: 20, spread: 4 }] },
-  { id: 'sport', name: 'Spor yapıyorum', icon: 'barbell-outline', ...PALETTE.teal, world: 4, country: 3, peaks: [{ hour: 19, spread: 3 }] },
-  { id: 'tv', name: 'Dizi/film izliyorum', icon: 'tv-outline', ...PALETTE.rose, world: 7, country: 8, peaks: [{ hour: 21, spread: 3 }] },
-  { id: 'coffee', name: 'Kahve içiyorum', icon: 'cafe-outline', ...PALETTE.amber, world: 5, country: 6, peaks: [{ hour: 9, spread: 2.5 }] },
-  { id: 'gaming', name: 'Oyun oynuyorum', icon: 'game-controller-outline', ...PALETTE.rose, world: 9, country: 6, peaks: [{ hour: 22, spread: 4 }] },
-  { id: 'shop', name: 'Alışveriş yapıyorum', icon: 'cart-outline', ...PALETTE.amber, world: 3.5, country: 3, peaks: [{ hour: 15, spread: 4 }] },
-  { id: 'chores', name: 'Ev işi yapıyorum', icon: 'home-outline', ...PALETTE.teal, world: 5, country: 2, peaks: [{ hour: 11, spread: 4 }] },
-  { id: 'friends', name: 'Arkadaşlarımlayım', icon: 'people-outline', ...PALETTE.rose, world: 4.5, country: 2, peaks: [{ hour: 20, spread: 4 }] },
-  { id: 'scrolling', name: 'Telefonda geziniyorum', icon: 'phone-portrait-outline', ...PALETTE.rose, world: 10, country: 8, peaks: [{ hour: 22, spread: 3 }] },
-  { id: 'resting', name: 'Dinleniyorum', icon: 'leaf-outline', ...PALETTE.teal, world: 8, country: 6, peaks: [{ hour: 14, spread: 5 }] },
-  { id: 'nothing', name: 'Boş boş oturuyorum', icon: 'ellipsis-horizontal-outline', ...PALETTE.indigo, world: 6, country: 5, peaks: [{ hour: 16, spread: 5 }], mood: true },
-  { id: 'bored', name: 'Sıkılıyorum', icon: 'sad-outline', ...PALETTE.indigo, world: 7, country: 5, peaks: [{ hour: 15, spread: 5 }], mood: true },
-  { id: 'procrastinating', name: 'Erteliyorum', icon: 'time-outline', ...PALETTE.indigo, world: 8, country: 6, peaks: [{ hour: 15, spread: 4 }], mood: true },
-  { id: 'money', name: 'Borçları düşünüyorum', icon: 'wallet-outline', ...PALETTE.indigo, world: 5, country: 4, peaks: [{ hour: 21, spread: 4 }], mood: true },
+  { id: 'lying', name: 'Uzanıyorum', icon: Bed, ...PALETTE.indigo, world: 22, country: 30, peaks: [{ hour: 3, spread: 3.5 }] },
+  { id: 'work', name: 'İşteyim', icon: Briefcase, ...PALETTE.indigo, world: 18, country: 14, peaks: [{ hour: 11, spread: 4.5 }] },
+  { id: 'eat', name: 'Yemek yiyorum', icon: ForkKnife, ...PALETTE.amber, world: 7.5, country: 9, peaks: [{ hour: 8, spread: 1.3 }, { hour: 13, spread: 1.3 }, { hour: 19, spread: 1.3 }] },
+  { id: 'cook', name: 'Yemek yapıyorum', icon: CookingPot, ...PALETTE.amber, world: 5, country: 7, peaks: [{ hour: 12, spread: 1.3 }, { hour: 18.5, spread: 1.5 }] },
+  { id: 'travel', name: 'Yoldayım', icon: Car, ...PALETTE.teal, world: 8, country: 10, peaks: [{ hour: 8, spread: 1.3 }, { hour: 18, spread: 1.3 }] },
+  { id: 'study', name: 'Ders çalışıyorum', icon: BookOpen, ...PALETTE.indigo, world: 6, country: 7, peaks: [{ hour: 20, spread: 4 }] },
+  { id: 'sport', name: 'Spor yapıyorum', icon: Barbell, ...PALETTE.teal, world: 4, country: 3, peaks: [{ hour: 19, spread: 3 }] },
+  { id: 'tv', name: 'Dizi/film izliyorum', icon: Television, ...PALETTE.rose, world: 7, country: 8, peaks: [{ hour: 21, spread: 3 }] },
+  { id: 'coffee', name: 'Kahve içiyorum', icon: Coffee, ...PALETTE.amber, world: 5, country: 6, peaks: [{ hour: 9, spread: 2.5 }] },
+  { id: 'gaming', name: 'Oyun oynuyorum', icon: GameController, ...PALETTE.rose, world: 9, country: 6, peaks: [{ hour: 22, spread: 4 }] },
+  { id: 'shop', name: 'Alışveriş yapıyorum', icon: ShoppingCart, ...PALETTE.amber, world: 3.5, country: 3, peaks: [{ hour: 15, spread: 4 }] },
+  { id: 'chores', name: 'Ev işi yapıyorum', icon: Broom, ...PALETTE.teal, world: 5, country: 2, peaks: [{ hour: 11, spread: 4 }] },
+  { id: 'friends', name: 'Arkadaşlarımla birlikteyim', icon: UsersThree, ...PALETTE.rose, world: 4.5, country: 2, peaks: [{ hour: 20, spread: 4 }] },
+  { id: 'scrolling', name: 'Telefonda geziniyorum', icon: DeviceMobile, ...PALETTE.rose, world: 10, country: 8, peaks: [{ hour: 22, spread: 3 }] },
+  { id: 'resting', name: 'Dinleniyorum', icon: Leaf, ...PALETTE.teal, world: 8, country: 6, peaks: [{ hour: 14, spread: 5 }] },
+  { id: 'happy', name: 'Neşeliyim', icon: Smiley, ...PALETTE.indigo, world: 8, country: 7, peaks: [{ hour: 20, spread: 5 }], mood: true },
+  { id: 'calm', name: 'Huzurluyum', icon: FlowerLotus, ...PALETTE.indigo, world: 6, country: 5, peaks: [{ hour: 10, spread: 5 }], mood: true },
+  { id: 'hurt', name: 'Kırgınım', icon: HeartBreak, ...PALETTE.indigo, world: 4, country: 4, peaks: [{ hour: 22, spread: 4 }], mood: true },
+  { id: 'angry', name: 'Öfkeliyim', icon: SmileyAngry, ...PALETTE.indigo, world: 4, country: 4, peaks: [{ hour: 18, spread: 4 }], mood: true },
+  { id: 'bored', name: 'Sıkılıyorum', icon: SmileySad, ...PALETTE.indigo, world: 7, country: 5, peaks: [{ hour: 15, spread: 5 }], mood: true },
+  { id: 'procrastinating', name: 'Erteliyorum', icon: Hourglass, ...PALETTE.indigo, world: 8, country: 6, peaks: [{ hour: 15, spread: 4 }], mood: true },
+  { id: 'nothing', name: 'Boş boş oturuyorum', icon: Armchair, ...PALETTE.indigo, world: 6, country: 5, peaks: [{ hour: 16, spread: 5 }], mood: true },
+  { id: 'money', name: 'Borçları düşünüyorum', icon: Wallet, ...PALETTE.indigo, world: 5, country: 4, peaks: [{ hour: 21, spread: 4 }], mood: true },
 ];
+
+const ACTIVITIES_BY_ID: Record<string, Activity> = Object.fromEntries(ACTIVITIES.map((a) => [a.id, a]));
 
 const FILTERS = [
   { id: 'world', label: 'Dünya' },
@@ -113,18 +201,7 @@ const FILTERS = [
   { id: 'gender', label: 'Cinsiyet' },
 ] as const;
 
-const COUNTRIES = [
-  'Türkiye', 'Almanya', 'Amerika Birleşik Devletleri', 'Azerbaycan', 'Birleşik Krallık',
-  'Fransa', 'Hollanda', 'İtalya', 'İspanya', 'Kanada', 'Kuzey Kıbrıs', 'Diğer',
-];
-const REGION_TO_COUNTRY: Record<string, string> = {
-  TR: 'Türkiye', DE: 'Almanya', US: 'Amerika Birleşik Devletleri', AZ: 'Azerbaycan',
-  GB: 'Birleşik Krallık', FR: 'Fransa', NL: 'Hollanda', IT: 'İtalya', ES: 'İspanya',
-  CA: 'Kanada', CY: 'Kuzey Kıbrıs',
-};
 const AGE_RANGES = ['18-24', '25-34', '35-44', '45-54', '55+'];
-const GENDERS = ['Kadın', 'Erkek', 'Belirtmek istemiyorum'];
-const NO_ANSWER = 'Belirtmek istemiyorum';
 
 const CITIES = [
   'Adana', 'Adıyaman', 'Afyonkarahisar', 'Ağrı', 'Aksaray', 'Amasya', 'Ankara', 'Antalya',
@@ -141,7 +218,17 @@ const CITIES = [
 
 type FilterId = (typeof FILTERS)[number]['id'];
 type Profile = { country?: string; age?: string; city?: string; gender?: string };
+
+// Filtre simgeleri (karşılaştırma satırı)
+const FILTER_ICONS: Record<FilterId, ComponentType<{ size?: number; color?: string; weight?: any }>> = {
+  world: GlobeHemisphereEast,
+  country: Flag,
+  city: MapPin,
+  age: Cake,
+  gender: GenderIntersex,
+};
 type Ratio = { enough: boolean; pct?: number } | null;
+type DashboardRow = { activity: string; cnt: number };
 
 let sessionPromise: Promise<boolean> | null = null;
 function ensureSession() {
@@ -167,7 +254,7 @@ async function pushPresence(activityId: string, profile: Profile, consent: boole
     p_country: p.country ?? null,
     p_age: p.age ?? null,
     p_city: p.city ?? null,
-    p_gender: p.gender && p.gender !== NO_ANSWER ? p.gender : null,
+    p_gender: p.gender ?? null,
   });
   return !error;
 }
@@ -187,8 +274,81 @@ async function fetchRatio(activityId: string, scope: string, value: string | nul
   return data as Ratio;
 }
 
-function formatPct(p: number) {
-  return '%' + p.toFixed(1).replace('.', ',');
+async function fetchActiveCount(): Promise<number | null> {
+  if (!(await ensureSession())) return null;
+  const { data, error } = await supabase.rpc('get_active_count');
+  if (error || typeof data !== 'number') return null;
+  return data;
+}
+
+async function fetchDashboard(): Promise<DashboardRow[] | null> {
+  if (!(await ensureSession())) return null;
+  const { data, error } = await supabase.rpc('get_dashboard');
+  if (error || !Array.isArray(data)) return null;
+  return data as DashboardRow[];
+}
+
+// "Günün Anı" bildirim kartı gösterilmeli mi? (sadece bir kez sorulur)
+async function shouldAskNotifications(): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  try {
+    if ((await AsyncStorage.getItem(NOTIF_ASKED_KEY)) === 'yes') return false;
+    if (await hasNotificationPermission()) {
+      await AsyncStorage.setItem(NOTIF_ASKED_KEY, 'yes');
+      scheduleDailyMoments().catch(() => {});
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Gündüz (09:00-18:00) standart ilk üç aktivite
+const WEEKDAY_TOP = ['work', 'coffee', 'shop'];
+const WEEKEND_TOP = ['shop', 'gaming', 'sport'];
+const LIVE_WEIGHT = 0.5; // Karma yöntemde gerçek verinin ağırlığı
+
+// Saate göre tahmini puan (0-1 arası); gündüz standart üçlü en üstte
+function baselineScores(date: Date): Record<string, number> {
+  const hour = date.getHours();
+  const day = date.getDay();
+  const weekend = day === 0 || day === 6;
+  const main = ACTIVITIES.filter((a) => !a.mood);
+  const raw: Record<string, number> = {};
+  let max = 0;
+  for (const a of main) {
+    raw[a.id] = timeFactor(a.peaks, hour) * a.world;
+    if (raw[a.id] > max) max = raw[a.id];
+  }
+  const scores: Record<string, number> = {};
+  for (const a of main) scores[a.id] = max > 0 ? (raw[a.id] / max) * 0.9 : 0;
+  if (hour >= 9 && hour < 18) {
+    const top = weekend ? WEEKEND_TOP : WEEKDAY_TOP;
+    top.forEach((id, i) => {
+      scores[id] = 1 + (top.length - i) * 0.01;
+    });
+  }
+  return scores;
+}
+
+// Ana aktiviteleri sırala: canlı veri varsa tahminle yarı yarıya karıştır
+function rankMainActivities(date: Date, liveRows: DashboardRow[] | null): Activity[] {
+  const base = baselineScores(date);
+  let live: Record<string, number> | null = null;
+  if (liveRows && liveRows.length > 0) {
+    const maxCnt = Math.max(...liveRows.map((r) => r.cnt));
+    if (maxCnt > 0) {
+      live = {};
+      for (const r of liveRows) live[r.activity] = r.cnt / maxCnt;
+    }
+  }
+  const score = (a: Activity) => {
+    const b = base[a.id] ?? 0;
+    if (!live) return b;
+    return (1 - LIVE_WEIGHT) * b + LIVE_WEIGHT * (live[a.id] ?? 0);
+  };
+  return ACTIVITIES.filter((a) => !a.mood).sort((a, b) => score(b) - score(a));
 }
 
 function circularDist(a: number, b: number) {
@@ -204,21 +364,6 @@ function timeFactor(peaks: Peak[], hour: number) {
     if (g > best) best = g;
   }
   return 0.5 + 1.5 * best;
-}
-
-function lineFor(filter: FilterId, value?: string | null) {
-  switch (filter) {
-    case 'world':
-      return 'Şu an dünyada seninle aynı şeyi yapanların oranı';
-    case 'country':
-      return `Şu an ülkende (${value}) seninle aynı şeyi yapanların oranı`;
-    case 'age':
-      return `Şu an ${value} yaş aralığında seninle aynı şeyi yapanların oranı`;
-    case 'city':
-      return `Şu an ${value} ilinde seninle aynı şeyi yapanların oranı`;
-    case 'gender':
-      return `Şu an ${value?.toLocaleLowerCase('tr-TR')} kullanıcılar arasında seninle aynı şeyi yapanların oranı`;
-  }
 }
 
 function tap(select = false) {
@@ -286,53 +431,60 @@ function PressableScale({
   );
 }
 
-function IconCircle({
-  size,
-  grad,
-  icon,
-  iconSize,
+function ActivityIcon({
+  activity,
+  size = 40,
+  iconSize = 22,
+  bg,
 }: {
-  size: number;
-  grad: [string, string];
-  icon: IconName;
-  iconSize: number;
+  activity: Activity;
+  size?: number;
+  iconSize?: number;
+  bg?: string;
 }) {
-  const gid = `g-${size}-${grad[1].slice(1)}`;
+  const Icon = activity.icon;
   return (
     <View
       style={{
         width: size,
         height: size,
-        borderRadius: size / 2,
-        shadowColor: grad[1],
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.35,
-        shadowRadius: 8,
-        elevation: 5,
+        borderRadius: size * 0.3,
+        backgroundColor: bg ?? activity.bg,
+        alignItems: 'center',
+        justifyContent: 'center',
       }}
     >
-      <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <Defs>
-          <LinearGradient id={gid} x1="0" y1="0" x2={size} y2={size}>
-            <Stop offset="0" stopColor={grad[0]} />
-            <Stop offset="1" stopColor={grad[1]} />
-          </LinearGradient>
-        </Defs>
-        <Circle cx={size / 2} cy={size / 2} r={size / 2} fill={`url(#${gid})`} />
-      </Svg>
-      <View
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Ionicons name={icon} size={iconSize} color="#ffffff" />
-      </View>
+      <Icon size={iconSize} color={activity.fg} weight="duotone" />
+    </View>
+  );
+}
+
+// Ana ekran üst alanındaki dağınık insan figürleri (logodaki motif)
+const HERO_PEOPLE = [
+  { x: 10, y: 22, s: 16, o: 0.18 },
+  { x: 42, y: 4, s: 14, o: 0.18 },
+  { x: 76, y: 14, s: 20, o: 0.32 },
+  { x: 112, y: 2, s: 14, o: 0.18 },
+  { x: 28, y: 54, s: 18, o: 0.28 },
+  { x: 66, y: 60, s: 14, o: 0.18 },
+  { x: 102, y: 44, s: 24, o: 0.45 },
+  { x: 132, y: 78, s: 14, o: 0.18 },
+  { x: 86, y: 96, s: 16, o: 0.22 },
+  { x: 48, y: 100, s: 12, o: 0.16 },
+];
+
+function HeroPeople() {
+  return (
+    <View style={styles.heroPeople} pointerEvents="none">
+      {HERO_PEOPLE.map((p, i) => (
+        <Ionicons
+          key={i}
+          name="person"
+          size={p.s}
+          color="#ffffff"
+          style={{ position: 'absolute', left: p.x, top: p.y, opacity: p.o }}
+        />
+      ))}
     </View>
   );
 }
@@ -354,7 +506,7 @@ function Sparkles({ color }: { color: string }) {
     Animated.stagger(0, anims).start();
   }, []);
   return (
-    <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+    <View style={ABS_FILL} pointerEvents="none">
       {vals.map((v, i) => {
         const translateY = v.interpolate({ inputRange: [0, 1], outputRange: [0, -42] });
         const opacity = v.interpolate({ inputRange: [0, 0.15, 0.7, 1], outputRange: [0, 1, 1, 0] });
@@ -511,18 +663,19 @@ function InstaBadge({ size = 22 }: { size?: number }) {
   );
 }
 
-function Splash() {
+function Splash({ tx }: { tx: Strings }) {
   const fade = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(fade, { toValue: 1, duration: DUR, delay: 1300, easing: EASE, useNativeDriver: true }).start();
   }, []);
   return (
     <SafeAreaView style={styles.splashSafe}>
+      <StatusBar style="light" />
       <View style={styles.splashCenter}>
         <SplashLogo />
         <Animated.View style={{ opacity: fade, marginTop: SP.xxl }}>
-          <Text style={styles.splashQuestion}>Şu an dünyada{'\n'}kim ne yapıyor?</Text>
-          <Text style={styles.splashHint}>Merak ediyorsan hemen öğren</Text>
+          <Text style={styles.splashQuestion}>{tx.splashQuestion}</Text>
+          <Text style={styles.splashHint}>{tx.splashHint}</Text>
         </Animated.View>
       </View>
     </SafeAreaView>
@@ -534,12 +687,12 @@ const BIG_H = 104;
 
 function charWidth(ch: string) {
   if (ch >= '0' && ch <= '9') return BIG * 0.66;
-  if (ch === ',') return BIG * 0.32;
+  if (ch === ',' || ch === '.') return BIG * 0.32;
   if (ch === '%') return BIG * 0.98;
   return BIG * 0.8;
 }
 
-function CountUp({ value, color }: { value: number; color: string }) {
+function CountUp({ value, color, lang }: { value: number; color: string; lang: Lang }) {
   const anim = useRef(new Animated.Value(0)).current;
   const [shown, setShown] = useState(0);
   useEffect(() => {
@@ -557,9 +710,9 @@ function CountUp({ value, color }: { value: number; color: string }) {
     }).start();
   }, [value]);
 
-  const finalText = formatPct(value);
+  const finalText = formatPct(value, lang);
   const totalWidth = finalText.split('').reduce((sum, ch) => sum + charWidth(ch), 0);
-  const text = formatPct(shown);
+  const text = formatPct(shown, lang);
 
   return (
     <View style={{ width: totalWidth, height: BIG_H, flexDirection: 'row', overflow: 'visible' }}>
@@ -585,13 +738,42 @@ function CountUp({ value, color }: { value: number; color: string }) {
   );
 }
 
+function CountUpInt({
+  value,
+  color,
+  fontSize = 40,
+  lang,
+}: {
+  value: number;
+  color: string;
+  fontSize?: number;
+  lang: Lang;
+}) {
+  const anim = useRef(new Animated.Value(0)).current;
+  const [shown, setShown] = useState(0);
+  useEffect(() => {
+    const id = anim.addListener(({ value: v }) => setShown(Math.round(v)));
+    return () => anim.removeListener(id);
+  }, [anim]);
+  useEffect(() => {
+    anim.stopAnimation();
+    anim.setValue(0);
+    Animated.timing(anim, { toValue: value, duration: 900, easing: EASE, useNativeDriver: false }).start();
+  }, [value]);
+  return (
+    <Text style={{ fontFamily: F.bold, fontSize, color }}>{formatCount(shown, lang)}</Text>
+  );
+}
+
+type PickOption = { value: string; label: string };
+
 function OptionPicker({
   title,
   options,
   onPick,
 }: {
   title: string;
-  options: string[];
+  options: PickOption[];
   onPick: (v: string) => void;
 }) {
   return (
@@ -600,14 +782,14 @@ function OptionPicker({
       <ScrollView>
         {options.map((o) => (
           <Pressable
-            key={o}
+            key={o.value}
             style={styles.row}
             onPress={() => {
               tap(true);
-              onPick(o);
+              onPick(o.value);
             }}
           >
-            <Text style={styles.rowText}>{o}</Text>
+            <Text style={styles.rowText}>{o.label}</Text>
           </Pressable>
         ))}
       </ScrollView>
@@ -615,25 +797,38 @@ function OptionPicker({
   );
 }
 
-function CityPicker({ onPick }: { onPick: (c: string) => void }) {
+// Arama kutulu seçici (şehir ve ülke için)
+function SearchPicker({
+  title,
+  placeholder,
+  options,
+  locale,
+  onPick,
+}: {
+  title: string;
+  placeholder: string;
+  options: PickOption[];
+  locale: string;
+  onPick: (v: string) => void;
+}) {
   const [q, setQ] = useState('');
-  const query = q.toLocaleLowerCase('tr-TR');
-  const list = CITIES.filter((c) => c.toLocaleLowerCase('tr-TR').includes(query));
+  const query = q.toLocaleLowerCase(locale);
+  const list = options.filter((o) => o.label.toLocaleLowerCase(locale).includes(query));
   return (
     <View style={styles.pickerOuter}>
-      <Text style={styles.pickerTitle}>Hangi ilde yaşıyorsun?</Text>
-      <TextInput style={styles.input} placeholder="İl ara" value={q} onChangeText={setQ} />
+      <Text style={styles.pickerTitle}>{title}</Text>
+      <TextInput style={styles.input} placeholder={placeholder} value={q} onChangeText={setQ} />
       <ScrollView keyboardShouldPersistTaps="handled">
-        {list.map((c) => (
+        {list.map((o) => (
           <Pressable
-            key={c}
+            key={o.value}
             style={styles.row}
             onPress={() => {
               tap(true);
-              onPick(c);
+              onPick(o.value);
             }}
           >
-            <Text style={styles.rowText}>{c}</Text>
+            <Text style={styles.rowText}>{o.label}</Text>
           </Pressable>
         ))}
       </ScrollView>
@@ -643,70 +838,254 @@ function CityPicker({ onPick }: { onPick: (c: string) => void }) {
 
 function ConsentCard({
   fg,
+  tx,
+  privacyUrl,
   onAccept,
   onDecline,
 }: {
   fg: string;
+  tx: Strings;
+  privacyUrl: string;
   onAccept: () => void;
   onDecline: () => void;
 }) {
   return (
     <View style={styles.consentOuter}>
       <View style={styles.consentCard}>
-        <Text style={styles.pickerTitle}>Karşılaştırma için bilgi paylaşımı</Text>
-        <Text style={styles.consentText}>
-          Ülke, yaş aralığı, şehir ve cinsiyet bilgilerin, seçtiğin aktivite ile birlikte anonim
-          olarak sunucuya gönderilir. Adın, e-postan ya da telefon numaran istenmez.
-        </Text>
-        <Text style={styles.consentText}>
-          Bilgilerin yalnızca oranları hesaplamak için kullanılır ve aktivitenin geçerli olduğu 60
-          dakika boyunca hesaba katılır. İstediğin zaman ana ekrandan silebilirsin.
-        </Text>
+        <Text style={styles.pickerTitle}>{tx.consentTitle}</Text>
+        <Text style={styles.consentText}>{tx.consentP1}</Text>
+        <Text style={styles.consentText}>{tx.consentP2}</Text>
+        <Pressable onPress={() => Linking.openURL(privacyUrl)}>
+          <Text style={[styles.privacyLink, { color: fg }]}>{tx.readPrivacy}</Text>
+        </Pressable>
         <Pressable style={[styles.primaryBtn, { backgroundColor: fg }]} onPress={onAccept}>
-          <Text style={styles.primaryBtnText}>Kabul ediyorum</Text>
+          <Text style={styles.primaryBtnText}>{tx.accept}</Text>
         </Pressable>
         <Pressable style={styles.ghostBtn} onPress={onDecline}>
-          <Text style={styles.ghostBtnText}>Şimdi değil</Text>
+          <Text style={styles.ghostBtnText}>{tx.notNow}</Text>
         </Pressable>
       </View>
     </View>
   );
 }
 
-function ShareCard({
-  innerRef,
-  activity,
-  pct,
-  line,
+function NotifPromptCard({
+  fg,
+  bg,
+  tx,
+  onAccept,
+  onDecline,
 }: {
-  innerRef: React.RefObject<View>;
-  activity: Activity;
-  pct: number;
-  line: string;
+  fg: string;
+  bg: string;
+  tx: Strings;
+  onAccept: () => void;
+  onDecline: () => void;
 }) {
+  const o = useRef(new Animated.Value(0)).current;
+  const y = useRef(new Animated.Value(24)).current;
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(o, { toValue: 1, duration: DUR, easing: EASE, useNativeDriver: true }),
+      Animated.timing(y, { toValue: 0, duration: DUR + 120, easing: EASE, useNativeDriver: true }),
+    ]).start();
+  }, []);
+  return (
+    <Animated.View style={[styles.notifBackdrop, { opacity: o }]}>
+      <Pressable style={ABS_FILL} onPress={onDecline} />
+      <Animated.View style={[styles.notifCard, { transform: [{ translateY: y }] }]}>
+        <View style={[styles.notifIconWrap, { backgroundColor: bg }]}>
+          <BellRinging size={28} color={fg} weight="duotone" />
+        </View>
+        <Text style={styles.notifTitle}>{tx.notifTitle}</Text>
+        <Text style={styles.notifText}>{tx.notifText}</Text>
+        <Text style={styles.notifSub}>{tx.notifSub}</Text>
+        <Pressable
+          style={[styles.primaryBtn, styles.notifBtn, { backgroundColor: fg }]}
+          onPress={onAccept}
+        >
+          <Text style={styles.primaryBtnText}>{tx.notifYes}</Text>
+        </Pressable>
+        <Pressable style={styles.ghostBtn} onPress={onDecline}>
+          <Text style={styles.ghostBtnText}>{tx.notNow}</Text>
+        </Pressable>
+      </Animated.View>
+    </Animated.View>
+  );
+}
+
+// Karşılaştırma filtreleri: başlık + simgeli seçenekler + eksik bilgide "+" işareti.
+// hint=true olduğunda "Ülke" seçeneği birkaç kez hafifçe nabız atar (ilk sonuçta bir kez).
+function FilterSegment({
+  filters,
+  active,
+  fg,
+  bg,
+  profile,
+  consent,
+  lang,
+  hint,
+  onChoose,
+}: {
+  filters: ReadonlyArray<{ id: FilterId; label: string }>;
+  active: FilterId;
+  fg: string;
+  bg: string;
+  profile: Profile;
+  consent: boolean;
+  lang: Lang;
+  hint: boolean;
+  onChoose: (id: FilterId) => void;
+}) {
+  const pulse = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!hint) {
+      pulse.stopAnimation();
+      pulse.setValue(0);
+      return;
+    }
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 520, easing: EASE, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 520, easing: EASE, useNativeDriver: true }),
+        Animated.delay(250),
+      ]),
+      { iterations: 3 }
+    );
+    anim.start();
+    return () => anim.stop();
+  }, [hint]);
+
+  const title = lang === 'tr' ? 'Kimlerle karşılaştıralım?' : 'Compare with…';
+  const labels: Record<FilterId, string> =
+    lang === 'tr'
+      ? { world: 'Dünya', country: 'Ülke', city: 'Şehir', age: 'Yaş', gender: 'Cinsiyet' }
+      : { world: 'World', country: 'Country', city: 'City', age: 'Age', gender: 'Gender' };
+
+  return (
+    <View>
+      <Text style={styles.segmentTitle}>{title}</Text>
+      <View style={styles.segment}>
+        {filters.map((f) => {
+          const isActive = active === f.id;
+          const Icon = FILTER_ICONS[f.id];
+          const missing = f.id !== 'world' && !(consent && profile[f.id as keyof Profile]);
+          const isHint = hint && f.id === 'country' && !isActive;
+          const scale = isHint ? pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }) : 1;
+          return (
+            <Animated.View key={f.id} style={[styles.segmentCell, { transform: [{ scale }] }]}>
+              {isHint ? (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[styles.segmentHalo, { backgroundColor: bg, opacity: pulse }]}
+                />
+              ) : null}
+              <Pressable
+                style={[styles.segmentBtn, isActive && { backgroundColor: fg }]}
+                onPress={() => onChoose(f.id)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isActive }}
+              >
+                <View>
+                  <Icon size={19} color={isActive ? '#ffffff' : SOFT} weight={isActive ? 'fill' : 'regular'} />
+                  {missing ? (
+                    <View
+                      style={[
+                        styles.segmentPlus,
+                        { backgroundColor: isActive ? '#ffffff' : fg },
+                      ]}
+                    >
+                      <Text style={[styles.segmentPlusText, { color: isActive ? fg : '#ffffff' }]}>+</Text>
+                    </View>
+                  ) : null}
+                </View>
+                <Text
+                  style={[styles.segmentText, isActive && styles.segmentTextActive]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
+                >
+                  {labels[f.id]}
+                </Text>
+              </Pressable>
+            </Animated.View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+// Instagram hikâyesi kartı — Stil 1 (gece): lacivert zemin + aktivite renginde ışıma.
+// 360x640 çizilir, 1080x1920 kaydedilir (3x). Svg boyutları bilerek sayı olarak verildi:
+// ekran dışında çizilen görünümde "100%" yanlış hesaplanıp gradyanı küçültüyordu.
+const STORY_W = 360;
+const STORY_H = 640;
+const STORY_BG = '#0E2850';
+const STORY_ACCENT = '#FBBF24';
+
+function StoryCard({ innerRef, story }: { innerRef: React.RefObject<View>; story: Story }) {
+  const glow = story.colors[1];
+  const noData = story.tier === 'none';
   return (
     <View style={styles.shareCardWrap} pointerEvents="none">
-      <View
-        ref={innerRef}
-        collapsable={false}
-        style={[styles.shareCard, { backgroundColor: activity.fg }]}
-      >
-        <View style={styles.shareBrandRow}>
-          <MiniLogoMark size={14} />
-          <Text style={styles.shareBrandTop}>{APP_NAME}</Text>
-        </View>
+      <View ref={innerRef} collapsable={false} style={styles.story}>
+        <Svg
+          width={STORY_W}
+          height={STORY_H}
+          viewBox={`0 0 ${STORY_W} ${STORY_H}`}
+          style={styles.storyBgSvg}
+        >
+          <Defs>
+            <RadialGradient
+              id="storyGlow"
+              cx={STORY_W / 2}
+              cy={280}
+              rx={200}
+              ry={215}
+              fx={STORY_W / 2}
+              fy={280}
+              gradientUnits="userSpaceOnUse"
+            >
+              <Stop offset="0" stopColor={glow} stopOpacity={0.6} />
+              <Stop offset="0.6" stopColor={glow} stopOpacity={0.45} />
+              <Stop offset="1" stopColor={glow} stopOpacity={0} />
+            </RadialGradient>
+          </Defs>
+          <Rect x={0} y={0} width={STORY_W} height={STORY_H} fill={STORY_BG} />
+          <Rect x={0} y={0} width={STORY_W} height={STORY_H} fill="url(#storyGlow)" />
+        </Svg>
 
-        <View style={styles.shareMiddle}>
-          <View style={styles.shareIconWrap}>
-            <Ionicons name={activity.icon} size={30} color={activity.fg} />
+        <View style={styles.storyTop}>
+          <Text style={styles.storyWhen}>{story.when}</Text>
+          <View style={styles.storyBadge}>
+            <Text style={styles.storyBadgeText}>{story.badge}</Text>
           </View>
-          <Text style={styles.sharePct}>{formatPct(pct)}</Text>
-          <Text style={styles.shareLine}>{line}</Text>
         </View>
 
-        <View style={styles.shareCta}>
-          <Text style={[styles.shareCtaText, { color: activity.fg }]}>Sen de dene</Text>
-          <Text style={[styles.shareCtaHandle, { color: activity.fg }]}>{INSTA_HANDLE}</Text>
+        <Text style={styles.storyEmoji}>{story.emoji}</Text>
+
+        <Text style={styles.storyQuestion}>{story.question}</Text>
+        <Text style={[styles.storyAnswer, noData && styles.storyAnswerNoData]}>
+          {story.answer[0]}
+          {story.answer[1] ? (
+            <Text style={noData ? null : styles.storyHighlight}>{story.answer[1]}</Text>
+          ) : null}
+          {story.answer[2]}
+        </Text>
+        {story.slogan ? <Text style={styles.storySlogan}>{story.slogan}</Text> : null}
+
+        <Text style={styles.storyCta}>
+          {story.ctaTeam[0]}
+          <Text style={styles.storyCtaBold}>{story.ctaTeam[1]}</Text>
+          {story.ctaTeam[2]}
+        </Text>
+        <Text style={styles.storyHandle}>→ {INSTA_HANDLE}</Text>
+
+        <View style={styles.storyBrand}>
+          <MiniLogoMark size={15} />
+          <Text style={styles.storyBrandText}>Şu An</Text>
         </View>
       </View>
     </View>
@@ -724,8 +1103,76 @@ function BackgroundDecor() {
   );
 }
 
+function DashboardScreen({
+  totalCount,
+  rows,
+  loading,
+  onBack,
+  tx,
+  lang,
+}: {
+  totalCount: number;
+  rows: DashboardRow[] | null;
+  loading: boolean;
+  onBack: () => void;
+  tx: Strings;
+  lang: Lang;
+}) {
+  const total = rows ? rows.reduce((s, r) => s + r.cnt, 0) : 0;
+  return (
+    <SafeAreaView style={styles.dashSafe}>
+      <StatusBar style="light" />
+      <FadeIn style={styles.dashContainer}>
+        <View style={styles.dashHeaderRow}>
+          <Pressable onPress={onBack} style={styles.dashBackBtn}>
+            <Ionicons name="arrow-back" size={20} color="#ffffff" />
+          </Pressable>
+          <Text style={styles.dashHeaderTitle}>{tx.dashTitle}</Text>
+          <View style={{ width: 36 }} />
+        </View>
+
+        <View style={styles.dashHeroCard}>
+          <Text style={styles.dashHeroLabel}>{tx.dashActive}</Text>
+          <CountUpInt value={totalCount} color="#ffffff" fontSize={52} lang={lang} />
+          <Text style={styles.dashHeroSub}>{tx.dashSub}</Text>
+        </View>
+
+        <Text style={styles.dashSectionTitle}>{tx.dashSection}</Text>
+
+        {loading ? (
+          <ActivityIndicator size="large" color="#ffffff" style={{ marginTop: SP.xxl }} />
+        ) : (
+          <ScrollView contentContainerStyle={{ paddingBottom: SP.xxl }}>
+            {(rows ?? []).map((r) => {
+              const a = ACTIVITIES_BY_ID[r.activity];
+              if (!a) return null;
+              const pct = total > 0 ? (r.cnt / total) * 100 : 0;
+              return (
+                <View key={r.activity} style={styles.dashRow}>
+                  <ActivityIcon activity={a} size={38} iconSize={20} bg="#ffffff" />
+                  <View style={{ flex: 1, marginLeft: SP.md }}>
+                    <Text style={styles.dashRowName}>{activityName(a.id, lang)}</Text>
+                    <View style={styles.dashBarTrack}>
+                      <View style={[styles.dashBarFill, { width: `${Math.max(4, pct)}%`, backgroundColor: a.fg }]} />
+                    </View>
+                  </View>
+                  <Text style={styles.dashRowCount}>{formatCount(r.cnt, lang)}</Text>
+                </View>
+              );
+            })}
+            {(!rows || rows.length === 0) && !loading ? (
+              <Text style={styles.dashEmptyText}>{tx.dashEmpty}</Text>
+            ) : null}
+          </ScrollView>
+        )}
+      </FadeIn>
+    </SafeAreaView>
+  );
+}
+
 export default function HomeScreen() {
   const [fontsLoaded] = useFonts({ DMSans_400Regular, DMSans_500Medium, DMSans_700Bold });
+  const insets = useSafeAreaInsets();
   const [ready, setReady] = useState(false);
   const [splashDone, setSplashDone] = useState(false);
   const [selected, setSelected] = useState<Activity | null>(null);
@@ -736,25 +1183,48 @@ export default function HomeScreen() {
   const [consent, setConsent] = useState(false);
   const [editing, setEditing] = useState(false);
   const [ratio, setRatio] = useState<Ratio>(null);
+  const [ratioError, setRatioError] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [lang, setLang] = useState<Lang>('tr');
+  const tx = STRINGS[lang];
   const [refreshKey, setRefreshKey] = useState(0);
+  const [filterHint, setFilterHint] = useState(false);
   const reqId = useRef(0);
+  const silentRefresh = useRef(false);
+  const lastEnough = useRef(false);
   const shareRef = useRef<View>(null);
+
+  const [activeCount, setActiveCount] = useState<number | null>(null);
+  const [dashboardOpen, setDashboardOpen] = useState(false);
+  const [dashboardRows, setDashboardRows] = useState<DashboardRow[] | null>(null);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [liveRows, setLiveRows] = useState<DashboardRow[] | null>(null);
+
+  const [notifPrompt, setNotifPrompt] = useState(false);
+  const notifTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (notifTimer.current) clearTimeout(notifTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     ensureSession();
     (async () => {
-      const [p, c] = await Promise.all([
+      const [p, c, l] = await Promise.all([
         AsyncStorage.getItem('profile'),
         AsyncStorage.getItem('consent'),
+        loadLang(),
       ]);
+      setLang(l);
       let loadedProfile: Profile = p ? JSON.parse(p) : {};
       if (c === 'yes') setConsent(true);
 
       if (!loadedProfile.country) {
         try {
           const region = Localization.getLocales()[0]?.regionCode ?? '';
-          const guessed = REGION_TO_COUNTRY[region] ?? 'Diğer';
+          const guessed = countryFromRegion(region);
           loadedProfile = { ...loadedProfile, country: guessed };
           AsyncStorage.setItem('profile', JSON.stringify(loadedProfile));
         } catch {}
@@ -784,29 +1254,93 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!selected) return;
     const value = filter === 'world' ? null : profile[filter as keyof Profile] ?? null;
-    if (filter !== 'world' && (!consent || !value || value === NO_ANSWER)) {
+    if (filter !== 'world' && (!consent || !value)) {
       setRatio(null);
+      setRatioError(false);
       setLoading(false);
       return;
     }
     const id = ++reqId.current;
-    setLoading(true);
+    const silent = silentRefresh.current;
+    silentRefresh.current = false;
+    if (!silent) setLoading(true);
     fetchRatio(selected.id, filter, value).then((r) => {
       if (id === reqId.current) {
+        // Arka planda yenilenirken veri yeterli hale geldiyse küçük bir titreşim
+        if (silent && r?.enough && !lastEnough.current) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        }
+        lastEnough.current = !!r?.enough;
         setRatio(r);
+        setRatioError(r === null);
         setLoading(false);
       }
     });
   }, [selected, filter, profile, consent, refreshKey]);
 
+  // İlk kez bir sonuç görüldüğünde filtrelere dikkat çek (cihaz başına bir kez)
+  useEffect(() => {
+    if (!selected || filter !== 'world' || loading || ratioError || ratio === null) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    AsyncStorage.getItem('filterHintSeen')
+      .then((seen) => {
+        if (seen || cancelled) return;
+        AsyncStorage.setItem('filterHintSeen', '1').catch(() => {});
+        timer = setTimeout(() => {
+          if (cancelled) return;
+          setFilterHint(true);
+          timer = setTimeout(() => setFilterHint(false), 4200);
+        }, 900);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [selected, filter, loading, ratioError, ratio]);
+
+  // Veri yokken oranı arka planda düzenli kontrol et; yeterli olunca kart kendiliğinden canlıya döner
+  useEffect(() => {
+    if (!selected || ratio?.enough) return;
+    const id = setInterval(() => {
+      silentRefresh.current = true;
+      setRefreshKey((k) => k + 1);
+    }, RATIO_POLL_MS);
+    return () => clearInterval(id);
+  }, [selected, ratio?.enough]);
+
+  // Toplam aktif kullanıcı sayısını periyodik olarak kontrol ediyoruz; sadece ana ekrandayken.
+  useEffect(() => {
+    if (selected || dashboardOpen) return;
+    let cancelled = false;
+    const check = () => {
+      setNow(Date.now());
+      fetchActiveCount().then((n) => {
+        if (cancelled || n === null) return;
+        setActiveCount(n);
+        if (n >= HERO_COUNT_THRESHOLD) {
+          fetchDashboard().then((rows) => {
+            if (!cancelled && rows) setLiveRows(rows);
+          });
+        } else {
+          setLiveRows(null);
+        }
+      });
+    };
+    check();
+    const id = setInterval(check, ACTIVE_COUNT_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [selected, dashboardOpen]);
+
   const sortedActivities = useMemo(() => {
-    const hour = new Date(now).getHours();
-    const main = ACTIVITIES.filter((a) => !a.mood).sort(
-      (a, b) => timeFactor(b.peaks, hour) * b.world - timeFactor(a.peaks, hour) * a.world
-    );
+    const main = rankMainActivities(new Date(now), liveRows);
     const mood = ACTIVITIES.filter((a) => a.mood);
     return [...main, ...mood];
-  }, [now]);
+  }, [now, liveRows]);
 
   function selectActivity(a: Activity) {
     tap();
@@ -818,9 +1352,33 @@ export default function HomeScreen() {
     setEditing(false);
     setRatio(null);
     pushPresence(a.id, profile, consent).then(() => setRefreshKey((k) => k + 1));
+    shouldAskNotifications().then((ask) => {
+      if (!ask) return;
+      if (notifTimer.current) clearTimeout(notifTimer.current);
+      notifTimer.current = setTimeout(() => setNotifPrompt(true), NOTIF_ASK_DELAY_MS);
+    });
+  }
+
+  function acceptNotifications() {
+    tap();
+    setNotifPrompt(false);
+    AsyncStorage.setItem(NOTIF_ASKED_KEY, 'yes').catch(() => {});
+    requestNotificationPermission()
+      .then((ok) => {
+        if (ok) scheduleDailyMoments().catch(() => {});
+      })
+      .catch(() => {});
+  }
+
+  function declineNotifications() {
+    tap(true);
+    setNotifPrompt(false);
+    AsyncStorage.setItem(NOTIF_ASKED_KEY, 'yes').catch(() => {});
   }
 
   function changeActivity() {
+    if (notifTimer.current) clearTimeout(notifTimer.current);
+    setNotifPrompt(false);
     setSelected(null);
     setStartedAt(null);
     setEditing(false);
@@ -830,6 +1388,7 @@ export default function HomeScreen() {
 
   function saveProfile(next: Profile) {
     setProfile(next);
+    if (filter === 'city' && next.country !== COUNTRY_TR) setFilter('world');
     AsyncStorage.setItem('profile', JSON.stringify(next));
     setEditing(false);
     if (selected) {
@@ -849,18 +1408,19 @@ export default function HomeScreen() {
 
   function chooseFilter(id: FilterId) {
     tap(true);
+    setFilterHint(false);
     setFilter(id);
     setEditing(false);
   }
 
   function resetAll() {
     Alert.alert(
-      'Bilgilerin silinsin mi?',
-      'Ülke, yaş, şehir ve cinsiyet seçimlerin ile sunucudaki aktif kaydın silinir.',
+      tx.resetTitle,
+      tx.resetText,
       [
-        { text: 'Vazgeç', style: 'cancel' },
+        { text: tx.cancel, style: 'cancel' },
         {
-          text: 'Sil',
+          text: tx.delete,
           style: 'destructive',
           onPress: async () => {
             await AsyncStorage.multiRemove(['profile', 'consent']);
@@ -878,90 +1438,136 @@ export default function HomeScreen() {
     );
   }
 
-  async function shareResult() {
+  async function shareStory() {
     if (!selected || !shareRef.current) return;
     tap();
+    // İlk paylaşımda bağlantı çıkartması hatırlatması (bir kez gösterilir)
+    try {
+      const seen = await AsyncStorage.getItem('storyHintSeen');
+      if (!seen) {
+        await AsyncStorage.setItem('storyHintSeen', '1');
+        await new Promise<void>((resolve) =>
+          Alert.alert(tx.storyHintTitle, tx.storyHintText, [{ text: tx.ok, onPress: () => resolve() }], {
+            cancelable: true,
+            onDismiss: () => resolve(),
+          })
+        );
+      }
+    } catch {}
     try {
       const uri = await captureRef(shareRef, {
         format: 'png',
         quality: 1,
         result: 'tmpfile',
         width: 1080,
-        height: 1080,
+        height: 1920,
       });
       const available = await Sharing.isAvailableAsync();
       if (available) {
-        await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Sonucunu paylaş' });
+        await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: tx.shareDialog });
       } else {
-        Alert.alert('Paylaşım kullanılamıyor', 'Bu cihazda paylaşım penceresi açılamadı.');
+        Alert.alert(tx.shareUnavailableTitle, tx.shareUnavailableText);
       }
     } catch {
-      Alert.alert('Bir sorun oluştu', 'Görsel oluşturulamadı, tekrar dener misin?');
+      Alert.alert(tx.shareErrorTitle, tx.shareErrorText);
     }
   }
 
+  function changeLanguage(next: Lang) {
+    if (next === lang) return;
+    tap(true);
+    setLang(next);
+    saveLang(next).then(() => scheduleDailyMoments().catch(() => {}));
+  }
+
+  function openDashboard() {
+    tap();
+    setDashboardOpen(true);
+    setDashboardLoading(true);
+    fetchDashboard().then((rows) => {
+      setDashboardRows(rows);
+      setDashboardLoading(false);
+    });
+  }
+
   if (!ready || !fontsLoaded) return <SafeAreaView style={styles.safe} />;
-  if (!splashDone) return <Splash />;
+  if (!splashDone) return <Splash tx={tx} />;
+
+  if (dashboardOpen) {
+    return (
+      <DashboardScreen
+        totalCount={activeCount ?? 0}
+        rows={dashboardRows}
+        loading={dashboardLoading}
+        onBack={() => setDashboardOpen(false)}
+        tx={tx}
+        lang={lang}
+      />
+    );
+  }
 
   if (selected) {
-    const { bg, fg, grad } = selected;
+    const { bg, fg } = selected;
+    const visibleFilters = FILTERS.filter((f) => f.id !== 'city' || profile.country === COUNTRY_TR);
     const needsProfile = filter !== 'world';
     const value = needsProfile ? profile[filter as keyof Profile] : undefined;
     const picking = needsProfile && (!value || editing);
-    const declined = filter === 'gender' && value === NO_ANSWER && !editing;
 
     const isReal = !!ratio?.enough && typeof ratio.pct === 'number';
     const pct = isReal ? (ratio!.pct as number) : null;
-    const shareLine = lineFor(filter, value);
+    const shareLine = ratioLine(filter, value, lang);
 
     const elapsed = startedAt ? now - startedAt : 0;
     const remainingMin = Math.max(0, Math.ceil((SESSION_MS - elapsed) / 60000));
 
     let resultShown = false;
+    let noData = false;
     let body;
     if (needsProfile && !consent) {
       body = (
-        <ConsentCard fg={fg} onAccept={acceptConsent} onDecline={() => setFilter('world')} />
+        <ConsentCard
+          fg={fg}
+          tx={tx}
+          privacyUrl={PRIVACY_URLS[lang]}
+          onAccept={acceptConsent}
+          onDecline={() => setFilter('world')}
+        />
       );
     } else if (picking && filter === 'country') {
       body = (
-        <OptionPicker
-          title="Hangi ülkede yaşıyorsun?"
-          options={COUNTRIES}
+        <SearchPicker
+          title={tx.pickCountry}
+          placeholder={tx.searchCountry}
+          options={countryOptions(lang)}
+          locale={lang === 'tr' ? 'tr-TR' : 'en-US'}
           onPick={(v) => saveProfile({ ...profile, country: v })}
         />
       );
     } else if (picking && filter === 'age') {
       body = (
         <OptionPicker
-          title="Yaş aralığını seç"
-          options={AGE_RANGES}
+          title={tx.pickAge}
+          options={AGE_RANGES.map((a) => ({ value: a, label: a }))}
           onPick={(v) => saveProfile({ ...profile, age: v })}
         />
       );
     } else if (picking && filter === 'city') {
-      body = <CityPicker onPick={(v) => saveProfile({ ...profile, city: v })} />;
+      body = (
+        <SearchPicker
+          title={tx.pickCity}
+          placeholder={tx.searchCity}
+          options={CITIES.map((c) => ({ value: c, label: c }))}
+          locale="tr-TR"
+          onPick={(v) => saveProfile({ ...profile, city: v })}
+        />
+      );
     } else if (picking && filter === 'gender') {
       body = (
         <OptionPicker
-          title="Cinsiyetini seç"
-          options={GENDERS}
+          title={tx.pickGender}
+          options={GENDER_VALUES.map((g) => ({ value: g, label: genderLabel(g, lang) }))}
           onPick={(v) => saveProfile({ ...profile, gender: v })}
         />
-      );
-    } else if (declined) {
-      body = (
-        <View style={styles.center}>
-          <View style={styles.resultCard}>
-            <Text style={styles.line}>Cinsiyetini belirtmediğin için bu filtre kapalı.</Text>
-            <Pressable
-              style={[styles.primaryBtn, { backgroundColor: fg }]}
-              onPress={() => setEditing(true)}
-            >
-              <Text style={styles.primaryBtnText}>Cinsiyetimi seç</Text>
-            </Pressable>
-          </View>
-        </View>
       );
     } else if (loading) {
       body = (
@@ -971,34 +1577,72 @@ export default function HomeScreen() {
           </View>
         </View>
       );
+    } else if (ratioError) {
+      body = (
+        <View style={styles.center}>
+          <View style={styles.resultCard}>
+            <View style={[styles.badge, styles.badgeEst]}>
+              <Text style={[styles.badgeText, styles.badgeTextEst]}>{tx.errorBadge}</Text>
+            </View>
+            <View style={[styles.noDataIcon, { backgroundColor: bg }]}>
+              <Ionicons name="cloud-offline-outline" size={30} color={fg} />
+            </View>
+            <Text style={styles.noDataTitle}>{tx.errorTitle}</Text>
+            <Text style={styles.note}>{tx.errorNote}</Text>
+            <Pressable
+              style={[styles.primaryBtn, { backgroundColor: fg, alignSelf: 'stretch' }]}
+              onPress={() => {
+                tap();
+                setRefreshKey((k) => k + 1);
+              }}
+            >
+              <Text style={styles.primaryBtnText}>{tx.retry}</Text>
+            </Pressable>
+          </View>
+        </View>
+      );
     } else if (isReal && pct !== null) {
       resultShown = true;
       body = (
         <View style={styles.center}>
           <View style={styles.resultCard}>
+            <View style={[styles.cardBlob, { backgroundColor: bg }]} />
             <Sparkles key={filter + 'r'} color={fg} />
             <View style={[styles.badge, styles.badgeLive]}>
-              <Text style={[styles.badgeText, styles.badgeTextLive]}>CANLI</Text>
+              <View style={styles.badgeDot} />
+              <Text style={[styles.badgeText, styles.badgeTextLive]}>{tx.live}</Text>
             </View>
-            <CountUp value={pct} color={fg} />
-            <Text style={styles.line}>{lineFor(filter, value)}</Text>
-            <Text style={styles.note}>Oran, uygulamayı kullananlar arasındadır.</Text>
+            <CountUp value={pct} color={fg} lang={lang} />
+            <Text style={styles.line}>{shareLine}</Text>
+            <View style={styles.peopleRow}>
+              <View style={styles.avatarStack}>
+                {[PALETTE.amber, PALETTE.indigo, PALETTE.teal].map((c, i) => (
+                  <View
+                    key={i}
+                    style={[styles.avatar, { backgroundColor: c.bg, marginLeft: i === 0 ? 0 : -8 }]}
+                  >
+                    <Ionicons name="person" size={12} color={c.fg} />
+                  </View>
+                ))}
+              </View>
+              <Text style={styles.peopleText}>{tx.amongUsers}</Text>
+            </View>
           </View>
         </View>
       );
     } else {
+      noData = true;
       body = (
         <View style={styles.center}>
           <View style={styles.resultCard}>
             <View style={[styles.badge, styles.badgeEst]}>
-              <Text style={[styles.badgeText, styles.badgeTextEst]}>HENÜZ VERİ YOK</Text>
+              <Text style={[styles.badgeText, styles.badgeTextEst]}>{tx.noData}</Text>
             </View>
-            <Ionicons name="people-outline" size={40} color={fg} style={{ marginVertical: SP.md }} />
-            <Text style={styles.line}>Henüz yeterli katılım yok</Text>
-            <Text style={styles.note}>
-              Bu aktiviteyi seçen ilk kişilerden birisin. Birkaç kişi daha katıldığında canlı oranı
-              burada göreceksin.
-            </Text>
+            <View style={[styles.noDataIcon, { backgroundColor: bg }]}>
+              <UsersThree size={32} color={fg} weight="duotone" />
+            </View>
+            <Text style={styles.noDataTitle}>{tx.firstTitle}</Text>
+            <Text style={styles.note}>{tx.firstNote}</Text>
           </View>
         </View>
       );
@@ -1006,38 +1650,68 @@ export default function HomeScreen() {
 
     return (
       <SafeAreaView style={[styles.safe, { backgroundColor: bg }]}>
+        <StatusBar style="dark" />
         <FadeIn style={styles.resultContainer}>
           <View style={styles.topRow}>
+            <Pressable
+              style={styles.backBtn}
+              onPress={() => {
+                tap();
+                changeActivity();
+              }}
+            >
+              <Ionicons name="arrow-back" size={20} color={INK} />
+            </Pressable>
             <View style={styles.chip}>
-              <IconCircle size={28} grad={grad} icon={selected.icon} iconSize={15} />
-              <Text style={styles.chipText}>{selected.name}</Text>
+              <ActivityIcon activity={selected} size={30} iconSize={18} />
+              <Text style={styles.chipText} numberOfLines={1}>
+                {activityName(selected.id, lang)}
+              </Text>
             </View>
           </View>
 
-          <View style={styles.filterRow}>
-            {FILTERS.map((f) => (
-              <Pressable
-                key={f.id}
-                style={[styles.filterBtn, filter === f.id && { backgroundColor: fg }]}
-                onPress={() => chooseFilter(f.id)}
-              >
-                <Text style={[styles.filterText, filter === f.id && styles.filterTextActive]}>
-                  {f.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
+          <FilterSegment
+            filters={visibleFilters}
+            active={filter}
+            fg={fg}
+            bg={bg}
+            profile={profile}
+            consent={consent}
+            lang={lang}
+            hint={filterHint}
+            onChoose={chooseFilter}
+          />
 
-          {needsProfile && consent && value && !editing && !declined ? (
+          {needsProfile && consent && value && !editing ? (
             <Pressable onPress={() => setEditing(true)}>
-              <Text style={[styles.editLink, { color: fg }]}>{value} · Değiştir</Text>
+              <Text style={[styles.editLink, { color: fg }]}>
+                {filter === 'country'
+                  ? countryLabel(value, lang)
+                  : filter === 'gender'
+                    ? genderLabel(value, lang)
+                    : value}{' '}
+                · {tx.change}
+              </Text>
             </Pressable>
           ) : null}
 
-          {body}
+          {picking ? (
+            <View style={styles.resultMiddle}>{body}</View>
+          ) : (
+            <ScrollView
+              style={styles.resultMiddle}
+              contentContainerStyle={styles.resultScroll}
+              showsVerticalScrollIndicator={false}
+            >
+              {body}
+            </ScrollView>
+          )}
 
           <View style={styles.timerBox}>
-            <Text style={styles.timerText}>{remainingMin} dk sonra otomatik olarak sona erer</Text>
+            <View style={styles.timerLabels}>
+              <Text style={styles.timerText}>{tx.validFor(remainingMin)}</Text>
+              <Text style={styles.timerText}>{tx.sixtyMin}</Text>
+            </View>
             <View style={styles.timerTrack}>
               <View
                 style={[
@@ -1048,98 +1722,306 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          <View style={styles.buttonsRow}>
-            {resultShown ? (
-              <Pressable style={[styles.button, styles.shareBtn]} onPress={shareResult}>
-                <InstaBadge size={20} />
-                <Text style={styles.buttonText}>Instada paylaş</Text>
+          <View style={styles.buttonsCol}>
+            {resultShown || noData ? (
+              <Pressable style={[styles.primaryAction, { backgroundColor: fg }]} onPress={shareStory}>
+                <Ionicons name="share-social-outline" size={18} color="#ffffff" />
+                <Text style={styles.primaryActionText}>{tx.shareActivity}</Text>
               </Pressable>
             ) : null}
             <Pressable
-              style={styles.button}
+              style={styles.secondaryAction}
               onPress={() => {
                 tap();
                 changeActivity();
               }}
             >
-              <Text style={styles.buttonText}>← Aktivitemi değiştir</Text>
+              <Text style={styles.buttonText}>{tx.changeActivity}</Text>
             </Pressable>
           </View>
         </FadeIn>
 
-        {resultShown && pct !== null ? (
-          <ShareCard innerRef={shareRef} activity={selected} pct={pct} line={shareLine} />
+        {resultShown || noData ? (
+          <StoryCard
+            innerRef={shareRef}
+            story={buildStory({
+              activityId: selected.id,
+              lang,
+              pct: resultShown ? pct : null,
+              filter,
+              value: filter === 'world' ? null : (value as string | null | undefined),
+            })}
+          />
+        ) : null}
+
+        {notifPrompt ? (
+          <NotifPromptCard
+            fg={fg}
+            bg={bg}
+            tx={tx}
+            onAccept={acceptNotifications}
+            onDecline={declineNotifications}
+          />
         ) : null}
       </SafeAreaView>
     );
   }
 
-  return (
-    <SafeAreaView style={styles.safe}>
-      <BackgroundDecor />
-      <FadeIn style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.container}>
-          <Text style={styles.title}>
-            Şu an <Text style={styles.titleAccent}>SEN</Text> ne yapıyorsun?
-          </Text>
-          <Text style={styles.subtitle}>Bir aktivite seç, senin gibi kaç kişi var gör.</Text>
+  const showDashboardEntry = activeCount !== null && activeCount >= DASHBOARD_THRESHOLD;
+  const mainActivities = sortedActivities.filter((a) => !a.mood);
+  const topThree = mainActivities.slice(0, 3);
+  const others = mainActivities.slice(3);
+  const moods = sortedActivities.filter((a) => a.mood);
+  const showHeroCount = activeCount !== null && activeCount >= HERO_COUNT_THRESHOLD;
+  const part = dayPart(lang);
 
-          <View style={styles.grid}>
-            {sortedActivities.map((a, i) => (
-              <StaggerIn key={a.id} delay={i * 22} style={styles.cardWrap}>
-                <PressableScale wrapStyle={styles.cardPress} style={styles.card} onPress={() => selectActivity(a)}>
-                  <IconCircle size={44} grad={a.grad} icon={a.icon} iconSize={22} />
-                  <Text style={styles.name} numberOfLines={2}>
-                    {a.name}
-                  </Text>
-                </PressableScale>
-              </StaggerIn>
-            ))}
+  return (
+    <View style={styles.homeRoot}>
+      <StatusBar style="light" />
+      <FadeIn style={{ flex: 1 }}>
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: insets.bottom + SP.xxl }}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={[styles.hero, { paddingTop: insets.top + SP.lg }]}>
+            <HeroPeople />
+            <View style={styles.heroLiveRow}>
+              {showHeroCount ? (
+                <>
+                  <View style={styles.liveDot} />
+                  <Text style={styles.heroLive}>{tx.heroCount(formatCount(activeCount!, lang))}</Text>
+                </>
+              ) : (
+                <>
+                  <Ionicons name={part.icon} size={14} color={part.color} />
+                  <Text style={styles.heroLive}>{part.text}</Text>
+                </>
+              )}
+            </View>
+            <Text style={styles.heroTitle}>
+              {tx.heroBefore}
+              <Text style={styles.heroAccent}>{tx.heroAccent}</Text>
+              {tx.heroAfter}
+            </Text>
+            <View style={styles.momentChip}>
+              <Ionicons name="notifications-outline" size={15} color="#ffffff" />
+              <Text style={styles.momentText}>{momentLabel(getTodayMoment(), lang)}</Text>
+            </View>
           </View>
 
-          {consent || Object.values(profile).some(Boolean) ? (
-            <Pressable onPress={resetAll}>
-              <Text style={styles.resetLink}>Kayıtlı bilgilerimi sıfırla</Text>
-            </Pressable>
-          ) : null}
+          <View style={styles.homeBody}>
+            {showDashboardEntry ? (
+              <Pressable style={styles.dashEntry} onPress={openDashboard}>
+                <View style={styles.dashEntryDot} />
+                <Text style={styles.dashEntryText}>{tx.dashEntry(formatCount(activeCount!, lang))}</Text>
+                <Ionicons name="chevron-forward" size={16} color={LOGO_NAVY} />
+              </Pressable>
+            ) : null}
+
+            <Text style={styles.sectionTitle}>{tx.sectionTop}</Text>
+            <View style={styles.topRow3}>
+              {topThree.map((a, i) => (
+                <StaggerIn key={a.id} delay={i * 30} style={styles.topCardWrap}>
+                  <PressableScale
+                    wrapStyle={styles.cardPress}
+                    style={[styles.topCard, { backgroundColor: a.bg }]}
+                    onPress={() => selectActivity(a)}
+                  >
+                    <ActivityIcon activity={a} size={42} iconSize={23} bg="#ffffff" />
+                    <Text style={styles.topCardName} numberOfLines={2}>
+                      {activityName(a.id, lang)}
+                    </Text>
+                  </PressableScale>
+                </StaggerIn>
+              ))}
+            </View>
+
+            <Text style={styles.sectionTitle}>{tx.sectionOthers}</Text>
+            <View style={styles.grid}>
+              {others.map((a, i) => (
+                <StaggerIn key={a.id} delay={90 + i * 18} style={styles.cardWrap}>
+                  <PressableScale wrapStyle={styles.cardPress} style={styles.card} onPress={() => selectActivity(a)}>
+                    <ActivityIcon activity={a} size={36} iconSize={20} />
+                    <Text style={styles.name} numberOfLines={2}>
+                      {activityName(a.id, lang)}
+                    </Text>
+                  </PressableScale>
+                </StaggerIn>
+              ))}
+            </View>
+
+            <Text style={styles.sectionTitle}>{tx.sectionMood}</Text>
+            <View style={styles.moodRow}>
+              {moods.map((a) => {
+                const Icon = a.icon;
+                return (
+                  <PressableScale
+                    key={a.id}
+                    style={styles.moodChip}
+                    onPress={() => selectActivity(a)}
+                  >
+                    <Icon size={17} color={a.fg} weight="duotone" />
+                    <Text style={styles.moodText} numberOfLines={1}>
+                      {activityName(a.id, lang)}
+                    </Text>
+                  </PressableScale>
+                );
+              })}
+            </View>
+
+            <View style={styles.footerLinks}>
+              {consent || Object.values(profile).some(Boolean) ? (
+                <Pressable onPress={resetAll}>
+                  <Text style={styles.resetLink}>{tx.resetLink}</Text>
+                </Pressable>
+              ) : null}
+              <Pressable onPress={() => Linking.openURL(PRIVACY_URLS[lang])}>
+                <Text style={styles.resetLink}>{tx.privacyLink}</Text>
+              </Pressable>
+              <View style={styles.langRow}>
+                {(['tr', 'en'] as Lang[]).map((l, i) => (
+                  <View key={l} style={styles.langItem}>
+                    {i > 0 ? <Text style={styles.langSep}>·</Text> : null}
+                    <Pressable onPress={() => changeLanguage(l)} hitSlop={8}>
+                      <Text style={[styles.langText, lang === l && styles.langTextActive]}>
+                        {l === 'tr' ? 'Türkçe' : 'English'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            </View>
+          </View>
         </ScrollView>
       </FadeIn>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#F7F7F9' },
-  bgDecor: { ...StyleSheet.absoluteFillObject, overflow: 'hidden' },
+  bgDecor: { ...ABS_FILL, overflow: 'hidden' },
   blob: { position: 'absolute', borderRadius: 999 },
   container: { padding: SP.xl, paddingBottom: SP.xxl + SP.xs },
   title: { fontFamily: F.bold, fontSize: FS.xxl, color: INK, marginTop: SP.sm, letterSpacing: -0.5 },
   titleAccent: { color: BRAND },
-  subtitle: { fontFamily: F.regular, fontSize: FS.base, color: SOFT, marginTop: SP.xs, marginBottom: SP.xl },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.md },
-  cardWrap: { width: '47.5%' },
-  cardPress: { width: '100%' },
-  card: {
-    backgroundColor: '#ffffff',
-    minHeight: 108,
-    borderRadius: SP.xl,
-    padding: SP.lg,
-    justifyContent: 'space-between',
-    ...CARD_SHADOW,
+  subtitle: { fontFamily: F.regular, fontSize: FS.base, color: SOFT, marginTop: SP.xs, marginBottom: SP.lg },
+  dashEntry: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EAF1FF',
+    borderRadius: 999,
+    paddingVertical: SP.sm + 2,
+    paddingHorizontal: SP.md,
+    marginBottom: SP.lg,
+    gap: SP.xs,
   },
-  name: {
+  dashEntryDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#22C55E' },
+  dashEntryText: { flex: 1, fontFamily: F.medium, fontSize: FS.sm, color: LOGO_NAVY, marginLeft: SP.xs },
+  homeRoot: { flex: 1, backgroundColor: '#F7F7F9' },
+  hero: {
+    backgroundColor: LOGO_NAVY,
+    paddingHorizontal: SP.xl,
+    paddingBottom: SP.xxl + SP.xs,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    overflow: 'hidden',
+  },
+  heroPeople: { position: 'absolute', right: -6, bottom: 18, width: 150, height: 124 },
+  heroLiveRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#22C55E' },
+  heroLive: { fontFamily: F.regular, fontSize: FS.sm, color: 'rgba(255,255,255,0.75)' },
+  heroTitle: {
+    fontFamily: F.bold,
+    fontSize: FS.xxl,
+    color: '#ffffff',
+    lineHeight: 34,
+    marginTop: SP.sm,
+    letterSpacing: -0.5,
+  },
+  heroAccent: { color: '#A5B4FC' },
+  momentChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 999,
+    paddingVertical: SP.sm,
+    paddingHorizontal: SP.md,
+    marginTop: SP.lg,
+  },
+  momentText: { fontFamily: F.medium, fontSize: FS.sm, color: '#ffffff' },
+  homeBody: { paddingHorizontal: SP.xl, paddingTop: SP.xs },
+  sectionTitle: {
+    fontFamily: F.bold,
+    fontSize: FS.md,
+    color: '#2A2A33',
+    marginTop: SP.xl,
+    marginBottom: SP.md,
+  },
+  topRow3: { flexDirection: 'row', gap: SP.sm + 2 },
+  topCardWrap: { flex: 1 },
+  topCard: {
+    minHeight: 115,
+    borderRadius: SP.lg + 2,
+    paddingVertical: SP.md + 2,
+    paddingHorizontal: SP.sm,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  topCardName: {
     fontFamily: F.bold,
     fontSize: FS.sm,
     color: INK,
-    lineHeight: 18,
+    textAlign: 'center',
+    lineHeight: 17,
     marginTop: SP.sm,
   },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm + 2 },
+  cardWrap: { width: '48.3%' },
+  cardPress: { width: '100%' },
+  card: {
+    backgroundColor: '#ffffff',
+    minHeight: 64,
+    borderRadius: SP.lg + 2,
+    paddingVertical: SP.md,
+    paddingHorizontal: SP.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SP.sm + 2,
+    ...SOFT_SHADOW,
+  },
+  name: {
+    flex: 1,
+    fontFamily: F.medium,
+    fontSize: FS.sm,
+    color: INK,
+    lineHeight: 17,
+  },
+  moodRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: SP.sm },
+  moodChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#ffffff',
+    borderRadius: 999,
+    paddingVertical: SP.sm + 1,
+    paddingHorizontal: SP.md + 2,
+    ...SOFT_SHADOW,
+  },
+  moodText: { fontFamily: F.medium, fontSize: FS.sm, color: INK },
+  footerLinks: { alignItems: 'center', marginTop: SP.xxl, gap: SP.sm },
+  langRow: { flexDirection: 'row', alignItems: 'center', marginTop: SP.sm },
+  langItem: { flexDirection: 'row', alignItems: 'center' },
+  langSep: { fontFamily: F.regular, fontSize: FS.sm, color: FAINT, marginHorizontal: SP.sm },
+  langText: { fontFamily: F.regular, fontSize: FS.sm, color: FAINT },
+  langTextActive: { fontFamily: F.bold, color: INK },
   resetLink: {
     fontFamily: F.regular,
     fontSize: FS.sm,
     color: FAINT,
     textAlign: 'center',
-    marginTop: SP.xxl,
     textDecorationLine: 'underline',
   },
 
@@ -1161,18 +2043,115 @@ const styles = StyleSheet.create({
   },
 
   resultContainer: { flex: 1, padding: SP.xl, paddingBottom: SP.lg },
-  topRow: { flexDirection: 'row' },
+  topRow: { flexDirection: 'row', alignItems: 'center', gap: SP.sm + 2 },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...SOFT_SHADOW,
+  },
+  segmentTitle: {
+    marginTop: SP.lg,
+    marginLeft: SP.xs,
+    marginBottom: SP.sm,
+    fontFamily: F.medium,
+    fontSize: FS.sm,
+    color: SOFT,
+  },
+  segment: {
+    flexDirection: 'row',
+    gap: 2,
+    backgroundColor: '#ffffff',
+    borderRadius: 22,
+    padding: 4,
+    ...SOFT_SHADOW,
+  },
+  segmentCell: { flex: 1 },
+  segmentHalo: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 18 },
+  segmentBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+    paddingTop: SP.sm,
+    paddingBottom: SP.sm - 1,
+    borderRadius: 18,
+  },
+  segmentPlus: {
+    position: 'absolute',
+    top: -4,
+    right: -8,
+    width: 13,
+    height: 13,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#ffffff',
+  },
+  segmentPlusText: { fontFamily: F.bold, fontSize: 9, lineHeight: 10 },
+  segmentText: { fontFamily: F.medium, fontSize: FS.xs, color: SOFT },
+  segmentTextActive: { color: '#ffffff' },
+  cardBlob: { position: 'absolute', right: -24, top: -24, width: 120, height: 120, borderRadius: 60, opacity: 0.7 },
+  badgeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#22C55E', marginRight: 6 },
+  peopleRow: { flexDirection: 'row', alignItems: 'center', marginTop: SP.lg },
+  avatarStack: { flexDirection: 'row', marginRight: SP.sm },
+  avatar: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 2,
+    borderColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  peopleText: { fontFamily: F.regular, fontSize: FS.xs, color: FAINT },
+  noDataIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: SP.xs,
+  },
+  noDataTitle: { fontFamily: F.bold, fontSize: FS.xl, color: INK, marginTop: SP.md },
+  timerLabels: { flexDirection: 'row', justifyContent: 'space-between' },
+  resultMiddle: { flex: 1, marginTop: SP.sm },
+  resultScroll: { flexGrow: 1, justifyContent: 'center', paddingVertical: SP.sm },
+  buttonsCol: { gap: SP.sm + 2 },
+  primaryAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SP.sm,
+    borderRadius: SP.lg,
+    paddingVertical: SP.md + 3,
+  },
+  primaryActionText: { fontFamily: F.medium, fontSize: FS.md, color: '#ffffff' },
+  secondaryAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+    borderRadius: SP.lg,
+    paddingVertical: SP.md + 3,
+    ...SOFT_SHADOW,
+  },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SP.sm,
     backgroundColor: '#ffffff',
     borderRadius: 999,
-    paddingHorizontal: SP.sm + SP.xs,
-    paddingVertical: SP.xs + 2,
+    paddingLeft: SP.xs + 1,
+    paddingRight: SP.md + 2,
+    paddingVertical: SP.xs + 1,
+    flexShrink: 1,
     ...SOFT_SHADOW,
   },
-  chipText: { fontFamily: F.bold, fontSize: FS.lg, color: INK, marginRight: SP.xs },
+  chipText: { flexShrink: 1, fontFamily: F.bold, fontSize: FS.lg, color: INK, marginRight: SP.xs },
 
   filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm, marginTop: SP.xl - SP.xs },
   filterBtn: {
@@ -1202,10 +2181,17 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     ...CARD_SHADOW,
   },
-  badge: { borderRadius: 999, paddingHorizontal: SP.md, paddingVertical: SP.xs, marginBottom: SP.md },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 999,
+    paddingHorizontal: SP.md,
+    paddingVertical: SP.xs,
+    marginBottom: SP.md,
+  },
   badgeLive: { backgroundColor: '#E3F6E8' },
   badgeEst: { backgroundColor: '#F0F1F3' },
-  badgeText: { fontFamily: F.bold, fontSize: FS.xs, letterSpacing: 0.6 },
+  badgeText: { fontFamily: F.medium, fontSize: FS.xs },
   badgeTextLive: { color: '#1f7a3d' },
   badgeTextEst: { color: '#44464C' },
   line: {
@@ -1235,6 +2221,47 @@ const styles = StyleSheet.create({
   ghostBtn: { paddingVertical: SP.md, alignItems: 'center', marginTop: SP.xs },
   ghostBtnText: { fontFamily: F.regular, color: SOFT, fontSize: FS.md },
 
+  notifBackdrop: {
+    ...ABS_FILL,
+    backgroundColor: 'rgba(15,42,82,0.35)',
+    justifyContent: 'center',
+    paddingHorizontal: SP.xl,
+  },
+  notifCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 28,
+    paddingHorizontal: SP.xxl,
+    paddingTop: SP.xxl,
+    paddingBottom: SP.md,
+    alignItems: 'center',
+    ...CARD_SHADOW,
+  },
+  notifIconWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SP.lg,
+  },
+  notifTitle: { fontFamily: F.bold, fontSize: FS.xl, color: INK, textAlign: 'center' },
+  notifText: {
+    fontFamily: F.regular,
+    fontSize: FS.md,
+    color: SOFT,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginTop: SP.sm,
+  },
+  notifSub: {
+    fontFamily: F.medium,
+    fontSize: FS.sm,
+    color: FAINT,
+    textAlign: 'center',
+    marginTop: SP.md,
+  },
+  notifBtn: { alignSelf: 'stretch' },
+
   consentOuter: { flex: 1, justifyContent: 'center' },
   consentCard: {
     backgroundColor: '#ffffff',
@@ -1243,6 +2270,12 @@ const styles = StyleSheet.create({
     ...CARD_SHADOW,
   },
   consentText: { fontFamily: F.regular, fontSize: FS.md, color: '#333', lineHeight: 22, marginBottom: SP.sm + SP.xs },
+  privacyLink: {
+    fontFamily: F.medium,
+    fontSize: FS.sm,
+    textDecorationLine: 'underline',
+    marginBottom: SP.xs,
+  },
 
   pickerOuter: {
     flex: 1,
@@ -1291,45 +2324,116 @@ const styles = StyleSheet.create({
   buttonText: { fontFamily: F.medium, fontSize: FS.md, color: INK },
 
   shareCardWrap: { position: 'absolute', top: -10000, left: 0 },
-  shareCard: {
-    width: 320,
-    height: 320,
-    borderRadius: 28,
-    padding: SP.xxl,
-    justifyContent: 'space-between',
+  // Hikâye kartı: 360x640 çizilir, 1080x1920 olarak kaydedilir (3x)
+  story: {
+    width: STORY_W,
+    height: STORY_H,
+    overflow: 'hidden',
+    backgroundColor: STORY_BG,
+    paddingHorizontal: 30,
+    paddingTop: 83,
   },
-  shareBrandRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SP.xs },
-  shareBrandTop: {
+  storyBgSvg: { position: 'absolute', top: 0, left: 0 },
+  storyTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  storyWhen: { fontFamily: F.medium, fontSize: 12, color: 'rgba(255,255,255,0.6)' },
+  storyBadge: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 5,
+  },
+  storyBadgeText: { fontFamily: F.bold, fontSize: 11.5, color: '#ffffff' },
+  storyEmoji: { marginTop: 22, fontSize: 48, lineHeight: 60 },
+  storyQuestion: {
+    marginTop: 12,
+    fontFamily: F.bold,
+    fontSize: 20,
+    lineHeight: 24,
+    letterSpacing: -0.4,
+    color: 'rgba(255,255,255,0.58)',
+  },
+  storyAnswer: {
+    marginTop: 10,
+    fontFamily: F.bold,
+    fontSize: 28,
+    lineHeight: 31,
+    letterSpacing: -0.8,
+    color: '#ffffff',
+  },
+  storyAnswerNoData: { fontSize: 30, lineHeight: 34 },
+  // Sayı: sarı vurgu (Stil 1)
+  storyHighlight: { color: STORY_ACCENT },
+  storySlogan: { marginTop: 18, fontFamily: F.bold, fontSize: 16, lineHeight: 21, color: STORY_ACCENT },
+  storyCta: { marginTop: 26, fontFamily: F.medium, fontSize: 12.5, lineHeight: 18, color: '#ffffff' },
+  storyCtaBold: { fontFamily: F.bold },
+  storyHandle: { marginTop: 2, fontFamily: F.bold, fontSize: 13, color: STORY_ACCENT },
+  storyBrand: {
+    position: 'absolute',
+    left: 30,
+    bottom: 82,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  storyBrandText: { fontFamily: F.bold, fontSize: 12.5, color: '#ffffff' },
+
+  dashSafe: { flex: 1, backgroundColor: LOGO_NAVY },
+  dashContainer: { flex: 1, padding: SP.xl },
+  dashHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: SP.lg },
+  dashBackBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dashHeaderTitle: { fontFamily: F.bold, fontSize: FS.lg, color: '#ffffff' },
+  dashHeroCard: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 24,
+    paddingVertical: SP.xl,
+    alignItems: 'center',
+    marginBottom: SP.xl,
+  },
+  dashHeroLabel: {
+    fontFamily: F.bold,
+    fontSize: FS.xs,
+    color: 'rgba(255,255,255,0.6)',
+    letterSpacing: 1,
+    marginBottom: SP.xs,
+  },
+  dashHeroSub: {
+    fontFamily: F.regular,
+    fontSize: FS.sm,
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: SP.xs,
+    textAlign: 'center',
+    paddingHorizontal: SP.xl,
+  },
+  dashSectionTitle: {
     fontFamily: F.bold,
     fontSize: FS.md,
     color: '#ffffff',
+    marginBottom: SP.md,
   },
-  shareMiddle: { alignItems: 'center' },
-  shareIconWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#ffffff',
+  dashRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SP.sm + 2,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 16,
+    padding: SP.md,
+    marginBottom: SP.sm,
   },
-  sharePct: { fontFamily: F.bold, fontSize: 56, color: '#ffffff', letterSpacing: -2 },
-  shareLine: {
-    fontFamily: F.medium,
+  dashRowName: { fontFamily: F.medium, fontSize: FS.base, color: '#ffffff', marginBottom: SP.xs },
+  dashBarTrack: { height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.15)' },
+  dashBarFill: { height: 5, borderRadius: 3 },
+  dashRowCount: { fontFamily: F.bold, fontSize: FS.base, color: '#ffffff', marginLeft: SP.md },
+  dashEmptyText: {
+    fontFamily: F.regular,
     fontSize: FS.base,
-    color: '#ffffff',
-    lineHeight: 19,
+    color: 'rgba(255,255,255,0.7)',
     textAlign: 'center',
-    marginTop: SP.xs,
-    paddingHorizontal: SP.sm,
+    marginTop: SP.xxl,
   },
-  shareCta: {
-    backgroundColor: '#ffffff',
-    borderRadius: 999,
-    paddingVertical: SP.md,
-    alignItems: 'center',
-  },
-  shareCtaText: { fontFamily: F.medium, fontSize: 13 },
-  shareCtaHandle: { fontFamily: F.bold, fontSize: FS.base, marginTop: 1 },
 });

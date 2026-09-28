@@ -1,167 +1,109 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-<meta charset="UTF-8">
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gizlilik Politikası — Şu An</title>
 <style>
-  :root {
-    --ink: #16161a;
-    --soft: #4b4b56;
-    --faint: #7a7a86;
-    --navy: #0F2A52;
-    --line: #e6e6ea;
-    --bg: #fafafa;
-  }
+  :root { --navy:#0F2A52; --ink:#16161a; --soft:#5b5b66; --line:#e6e7ee; --bg:#F7F7F9; --accent:#4F46E5; }
   * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--ink);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    line-height: 1.65;
-  }
-  .wrap {
-    max-width: 680px;
-    margin: 0 auto;
-    padding: 56px 24px 96px;
-  }
-  header {
-    margin-bottom: 40px;
-  }
-  .mark {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    border-radius: 12px;
-    background: var(--navy);
-    color: #fff;
-    font-weight: 700;
-    font-size: 18px;
-    margin-bottom: 20px;
-  }
-  h1 {
-    font-size: 28px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    margin: 0 0 6px;
-    color: var(--navy);
-  }
-  .updated {
-    color: var(--faint);
-    font-size: 14px;
-    margin: 0;
-  }
-  h2 {
-    font-size: 18px;
-    font-weight: 700;
-    color: var(--navy);
-    margin: 40px 0 12px;
-    padding-top: 24px;
-    border-top: 1px solid var(--line);
-  }
-  h2:first-of-type { border-top: none; padding-top: 0; margin-top: 32px; }
-  p { color: var(--soft); margin: 0 0 14px; }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 16px 0 20px;
-    font-size: 14.5px;
-  }
-  th, td {
-    text-align: left;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--line);
-    vertical-align: top;
-    color: var(--soft);
-  }
-  th {
-    color: var(--navy);
-    font-weight: 600;
-    font-size: 13px;
-  }
-  strong { color: var(--ink); }
-  .contact {
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 20px 22px;
-    margin-top: 8px;
-  }
-  .contact p { margin: 0; }
-  .contact .label { color: var(--faint); font-size: 13px; margin-bottom: 2px; }
-  .contact .val { color: var(--ink); font-weight: 600; }
-  footer {
-    margin-top: 48px;
-    padding-top: 24px;
-    border-top: 1px solid var(--line);
-    color: var(--faint);
-    font-size: 13px;
-    font-style: italic;
-  }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; line-height:1.65; }
+  header { background:var(--navy); color:#fff; padding:40px 20px 36px; }
+  header .wrap { max-width:760px; margin:0 auto; }
+  header .brand { font-weight:700; font-size:15px; opacity:.75; letter-spacing:.2px; }
+  header h1 { margin:8px 0 6px; font-size:30px; line-height:1.2; }
+  header .meta { font-size:14px; opacity:.8; }
+  header a { color:#A5B4FC; }
+  main { max-width:760px; margin:0 auto; padding:24px 20px 56px; }
+  h2 { font-size:19px; margin:32px 0 8px; color:var(--navy); }
+  p { margin:10px 0; }
+  a { color:var(--accent); }
+  .tablewrap { overflow-x:auto; margin:14px 0; }
+  table { width:100%; border-collapse:collapse; background:#fff; border-radius:12px; overflow:hidden; font-size:15px; }
+  th, td { text-align:left; padding:12px 14px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { background:#EEF0FF; color:var(--navy); font-weight:600; }
+  tr:last-child td { border-bottom:none; }
+  footer { max-width:760px; margin:0 auto; padding:0 20px 40px; font-size:13px; color:var(--soft); }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div class="mark">?</div>
-    <h1>Gizlilik Politikası</h1>
-    <p class="updated">Şu An (Kim Ne Yapıyor?) — Son güncelleme: 23 Eylül 2026</p>
-  </header>
-
-  <p>Bu gizlilik politikası, "Şu An" ("Kim Ne Yapıyor?") mobil uygulamasını ("Uygulama") kullanırken hangi verilerin toplandığını, nasıl kullanıldığını ve haklarınızın neler olduğunu açıklar.</p>
-
-  <h2>1. Veri Sorumlusu</h2>
-  <div class="contact">
-    <p class="label">Ad Soyad</p>
-    <p class="val">Fatih Mehmet Şenel</p>
-    <p class="label" style="margin-top:14px;">İletişim e-postası</p>
-    <p class="val">info@nasilogreniyorum.com</p>
-  </div>
-
-  <h2>2. Hangi Verileri Topluyoruz?</h2>
-  <p>Uygulama, şu anda ne yaptığınızı seçmenizi ve bunu dünyadaki/ülkenizdeki diğer kullanıcılarla oransal olarak karşılaştırmanızı sağlar. Bu amaçla aşağıdaki veriler işlenir:</p>
-  <table>
-    <tr><th>Veri</th><th>Zorunlu mu?</th><th>Açıklama</th></tr>
-    <tr><td>Seçtiğiniz aktivite</td><td>Evet</td><td>Uygulamanın temel işlevi için gerekli</td></tr>
-    <tr><td>Anonim cihaz/oturum kimliği</td><td>Evet</td><td>Kimliğinizi belirlemeyen, rastgele üretilen bir teknik kimlik. Ad, e-posta veya telefon numaranız alınmaz.</td></tr>
-    <tr><td>Ülke</td><td>Hayır</td><td>Karşılaştırma filtresi için, istediğiniz zaman değiştirebilir ya da paylaşmayabilirsiniz</td></tr>
-    <tr><td>Yaş aralığı</td><td>Hayır</td><td>Karşılaştırma filtresi için</td></tr>
-    <tr><td>Şehir</td><td>Hayır</td><td>Karşılaştırma filtresi için</td></tr>
-    <tr><td>Cinsiyet</td><td>Hayır</td><td>Karşılaştırma filtresi için; "Belirtmek istemiyorum" seçeneği mevcuttur</td></tr>
-  </table>
-  <p>Bu isteğe bağlı bilgileri paylaşmadan önce Uygulama size ayrı bir onay ekranı gösterir. Onaylamazsanız bu bilgiler sunucuya hiç gönderilmez ve yalnızca "Dünya" karşılaştırması kullanılabilir.</p>
-
-  <h2>3. Verileri Nasıl Kullanıyoruz?</h2>
-  <p>Toplanan veriler yalnızca, seçtiğiniz aktiviteyi yapan diğer kullanıcıların oranını hesaplamak ve size göstermek amacıyla kullanılır. Verileriniz; reklam, pazarlama, profil oluşturma veya üçüncü taraflara satış amacıyla kullanılmaz.</p>
-
-  <h2>4. Verileriniz Ne Kadar Süre Saklanır?</h2>
-  <p>Bir aktiviteyi seçtiğinizde, kaydınız 60 dakika boyunca aktif kalır ve bu süre içinde oran hesaplamalarına dahil edilir. 60 dakika sonunda kaydınız otomatik olarak sistemden silinir. İsteğe bağlı profil bilgileriniz cihazınızda yerel olarak saklanır ve siz silmediğiniz sürece bir sonraki aktivite seçiminizde tekrar kullanılabilir.</p>
-  <p>Uygulama içindeki <strong>"Kayıtlı bilgilerimi sıfırla"</strong> seçeneğiyle, cihazınızdaki tüm profil bilgilerini ve sunucudaki aktif kaydınızı istediğiniz an kalıcı olarak silebilirsiniz.</p>
-
-  <h2>5. Verileriniz Kimlerle Paylaşılıyor?</h2>
-  <p>Verileriniz üçüncü taraflarla paylaşılmaz veya satılmaz. Verileri barındırmak için Supabase adlı bir bulut altyapı sağlayıcısı kullanıyoruz (sunucu bölgesi: <strong>eu-central-1</strong>); Supabase yalnızca bir teknik hizmet sağlayıcı olarak görev yapar, verilerinizi kendi amaçları için kullanmaz.</p>
-
-  <h2>6. Gizlilik Eşiği (Küçük Grup Koruması)</h2>
-  <p>Bir karşılaştırma grubunda 20 kişiden az aktif kullanıcı varsa, o grup için hiçbir oran gösterilmez. Bu, küçük gruplarda bireylerin dolaylı yoldan tespit edilebilmesini önlemek için tasarlanmıştır.</p>
-
-  <h2>7. Haklarınız</h2>
-  <p>Kişisel verilerinizle ilgili olarak; verilerinizin işlenip işlenmediğini öğrenme, işlenmişse buna ilişkin bilgi talep etme, verilerinizin silinmesini isteme ve işlemenin amacına uygun kullanılıp kullanılmadığını öğrenme haklarına sahipsiniz. Bu haklarınızı kullanmak için <strong>info@nasilogreniyorum.com</strong> adresinden bize ulaşabilir, ya da uygulama içinden istediğiniz an "Kayıtlı bilgilerimi sıfırla" seçeneğiyle kendi verilerinizi doğrudan silebilirsiniz.</p>
-
-  <h2>8. Çocukların Gizliliği</h2>
-  <p>Uygulama, 13 yaşın altındaki çocuklara yönelik değildir ve bilerek onlardan veri toplamaz.</p>
-
-  <h2>9. Politika Değişiklikleri</h2>
-  <p>Bu gizlilik politikası zaman zaman güncellenebilir. Önemli değişiklikler olduğunda bu sayfadaki "Son güncelleme" tarihi değişecektir.</p>
-
-  <h2>10. Bize Ulaşın</h2>
-  <p>Sorularınız için: <strong>info@nasilogreniyorum.com</strong></p>
-
-  <footer>
-    Bu metin genel bir taslak olarak hazırlanmıştır ve hukuki tavsiye niteliği taşımaz. Yayınlamadan önce bir hukuk danışmanına gözden geçirtmeniz önerilir.
-  </footer>
-</div>
+<header><div class="wrap">
+  <div class="brand">Şu An: Kim Ne Yapıyor?</div>
+  <h1>Gizlilik Politikası</h1>
+  <div class="meta">Son güncelleme: 28 Eylül 2026 · <a href="../privacy/">English version</a></div>
+</div></header>
+<main>
+<p>Bu gizlilik politikası, "Şu An: Kim Ne Yapıyor?" mobil uygulamasını ("Uygulama") kullanırken hangi verilerin işlendiğini, nasıl kullanıldığını ve haklarınızın neler olduğunu açıklar.</p>
+<h2>1. Veri Sorumlusu</h2>
+<p><strong>Ad Soyad:</strong> Fatih Mehmet Şenel<br />
+<strong>İletişim:</strong> info@nasilogreniyorum.com</p>
+<h2>2. Hangi Verileri İşliyoruz?</h2>
+<p>Uygulama, şu anda ne yaptığınızı seçmenizi ve bunu diğer kullanıcılarla oransal olarak karşılaştırmanızı sağlar. Bu amaçla aşağıdaki veriler işlenir:</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Veri</th>
+<th>Zorunlu mu?</th>
+<th>Açıklama</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Seçtiğiniz aktivite veya ruh hali</td>
+<td>Evet</td>
+<td>Uygulamanın temel işlevi için gereklidir.</td>
+</tr>
+<tr>
+<td>Anonim kullanıcı kimliği</td>
+<td>Evet</td>
+<td>Uygulama ilk açıldığında otomatik oluşturulan, rastgele bir teknik kimliktir. Adınız, e-posta adresiniz veya telefon numaranız alınmaz.</td>
+</tr>
+<tr>
+<td>Ülke</td>
+<td>Hayır</td>
+<td>Karşılaştırma filtresi için.</td>
+</tr>
+<tr>
+<td>Yaş aralığı</td>
+<td>Hayır</td>
+<td>Karşılaştırma filtresi için.</td>
+</tr>
+<tr>
+<td>Şehir</td>
+<td>Hayır</td>
+<td>Karşılaştırma filtresi için (yalnızca Türkiye için).</td>
+</tr>
+<tr>
+<td>Cinsiyet</td>
+<td>Hayır</td>
+<td>Karşılaştırma filtresi için; "Belirtmek istemiyorum" seçeneği mevcuttur.</td>
+</tr>
+</tbody>
+</table></div>
+<p>İsteğe bağlı bilgiler sunucuya gönderilmeden önce Uygulama size ayrı bir onay ekranı gösterir. Onay vermezseniz bu bilgiler sunucuya hiç gönderilmez ve yalnızca "Dünya" karşılaştırması kullanılabilir.</p>
+<p>Uygulama; konumunuza, rehberinize, fotoğraflarınıza, kameranıza veya mikrofonunuza erişmez. Reklam veya analiz amaçlı üçüncü taraf takip araçları kullanılmaz.</p>
+<h2>3. Verileri Nasıl Kullanıyoruz?</h2>
+<p>Veriler yalnızca, seçtiğiniz aktiviteyi yapan diğer kullanıcıların oranını hesaplamak ve size göstermek amacıyla kullanılır. Verileriniz reklam, pazarlama, profil oluşturma veya üçüncü taraflara satış amacıyla kullanılmaz.</p>
+<h2>4. Verileriniz Ne Kadar Süre Saklanır?</h2>
+<p>Bir aktivite seçtiğinizde kaydınız 60 dakika boyunca aktif kalır ve bu süre içinde oran hesaplamalarına dahil edilir. Süresi dolan kayıtlar sunucudan otomatik olarak silinir. İsteğe bağlı profil bilgileriniz ve dil tercihiniz cihazınızda yerel olarak saklanır.</p>
+<p>Uygulama içindeki <strong>"Kayıtlı bilgilerimi sıfırla"</strong> seçeneğiyle, cihazınızdaki profil bilgilerini ve sunucudaki aktif kaydınızı istediğiniz an silebilirsiniz.</p>
+<h2>5. Günün Anı Bildirimleri</h2>
+<p>Bildirimlere izin verirseniz, Uygulama size her gün yerel saatinize göre 11:00-20:00 arasında bir kez "Günün Anı" bildirimi gönderir. Bu bildirimler telefonunuzda oluşturulur ve planlanır; bunun için sunucuya herhangi bir veri gönderilmez. Bildirimleri istediğiniz zaman telefonunuzun ayarlarından kapatabilirsiniz.</p>
+<h2>6. Paylaşım</h2>
+<p>Uygulama, sonucunuzu veya seçtiğiniz aktiviteyi paylaşmanız için telefonunuzun paylaşım menüsünü açar. Paylaşım yalnızca siz istediğinizde ve sizin seçtiğiniz uygulama üzerinden yapılır; Uygulama bu süreçte ek bir veri toplamaz.</p>
+<h2>7. Verileriniz Nerede Tutulur ve Kimlerle Paylaşılır?</h2>
+<p>Verileriniz üçüncü taraflarla paylaşılmaz veya satılmaz. Verileri barındırmak için Supabase adlı bulut altyapı sağlayıcısını kullanıyoruz. Sunucular Avrupa Birliği'nde, Almanya'da (Frankfurt, eu-central-1) bulunmaktadır. Supabase yalnızca teknik hizmet sağlayıcı olarak görev yapar ve verilerinizi kendi amaçları için kullanmaz. Uygulamayı kullanarak ve isteğe bağlı bilgiler için onay vererek, bu verilerin söz konusu sunucularda işlenmesini kabul etmiş olursunuz.</p>
+<h2>8. Gizlilik Eşiği (Küçük Grup Koruması)</h2>
+<p>Bir karşılaştırma grubunda 20 kişiden az aktif kullanıcı varsa, o grup için hiçbir oran gösterilmez. Bu, küçük gruplarda bireylerin dolaylı yoldan tespit edilmesini önlemek için tasarlanmıştır.</p>
+<h2>9. Haklarınız</h2>
+<p>6698 sayılı Kişisel Verilerin Korunması Kanunu kapsamında; verilerinizin işlenip işlenmediğini öğrenme, işlenmişse buna ilişkin bilgi talep etme, düzeltilmesini veya silinmesini isteme ve işleme amacına uygun kullanılıp kullanılmadığını öğrenme haklarına sahipsiniz. Bu haklarınızı kullanmak için <strong>info@nasilogreniyorum.com</strong> adresinden bize ulaşabilir ya da Uygulama içinden "Kayıtlı bilgilerimi sıfırla" seçeneğiyle verilerinizi doğrudan silebilirsiniz.</p>
+<h2>10. Yaş Sınırı</h2>
+<p>Uygulama 18 yaşından küçüklere yönelik değildir ve bilerek onlardan veri toplamaz.</p>
+<h2>11. Politika Değişiklikleri</h2>
+<p>Bu gizlilik politikası zaman zaman güncellenebilir. Önemli değişiklikler olduğunda bu sayfadaki "Son güncelleme" tarihi değişecektir.</p>
+<h2>12. Bize Ulaşın</h2>
+<p>Sorularınız için: <strong>info@nasilogreniyorum.com</strong></p>
+</main>
+<footer>© 2026 Şu An: Kim Ne Yapıyor?</footer>
 </body>
 </html>

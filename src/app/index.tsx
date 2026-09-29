@@ -5,6 +5,8 @@ import {
   Animated,
   Easing,
   Linking,
+  Modal,
+  PixelRatio,
   Platform,
   Pressable,
   ScrollView,
@@ -52,6 +54,7 @@ import {
   Wallet,
 } from 'phosphor-react-native';
 import * as Haptics from 'expo-haptics';
+import * as SplashScreen from 'expo-splash-screen';
 import * as Localization from 'expo-localization';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
@@ -1025,11 +1028,28 @@ const STORY_H = 640;
 const STORY_BG = '#0E2850';
 const STORY_ACCENT = '#FBBF24';
 
-function StoryCard({ innerRef, story }: { innerRef: React.RefObject<View>; story: Story }) {
+// Kaydedilen (ekran dışı) kart
+function StoryCard({ innerRef, story }: { innerRef: React.RefObject<View | null>; story: Story }) {
+  return (
+    <View style={styles.shareCardWrap} pointerEvents="none">
+      <StoryCardBody innerRef={innerRef} story={story} glowId="storyGlow" />
+    </View>
+  );
+}
+
+// Kartın kendisi: hem kaydedilen görselde hem paylaşım önizlemesinde kullanılır
+function StoryCardBody({
+  innerRef,
+  story,
+  glowId,
+}: {
+  innerRef?: React.RefObject<View | null>;
+  story: Story;
+  glowId: string;
+}) {
   const glow = story.colors[1];
   const noData = story.tier === 'none';
   return (
-    <View style={styles.shareCardWrap} pointerEvents="none">
       <View ref={innerRef} collapsable={false} style={styles.story}>
         <Svg
           width={STORY_W}
@@ -1039,7 +1059,7 @@ function StoryCard({ innerRef, story }: { innerRef: React.RefObject<View>; story
         >
           <Defs>
             <RadialGradient
-              id="storyGlow"
+              id={glowId}
               cx={STORY_W / 2}
               cy={280}
               rx={200}
@@ -1054,7 +1074,7 @@ function StoryCard({ innerRef, story }: { innerRef: React.RefObject<View>; story
             </RadialGradient>
           </Defs>
           <Rect x={0} y={0} width={STORY_W} height={STORY_H} fill={STORY_BG} />
-          <Rect x={0} y={0} width={STORY_W} height={STORY_H} fill="url(#storyGlow)" />
+          <Rect x={0} y={0} width={STORY_W} height={STORY_H} fill={`url(#${glowId})`} />
         </Svg>
 
         <View style={styles.storyTop}>
@@ -1088,7 +1108,62 @@ function StoryCard({ innerRef, story }: { innerRef: React.RefObject<View>; story
           <Text style={styles.storyBrandText}>Şu An</Text>
         </View>
       </View>
-    </View>
+  );
+}
+
+// Paylaşmadan önce kartın önizlemesini gösteren alt panel
+const PREVIEW_W = 200;
+const PREVIEW_SCALE = PREVIEW_W / STORY_W;
+
+function SharePreviewSheet({
+  visible,
+  story,
+  fg,
+  bg,
+  lang,
+  hint,
+  cancelLabel,
+  onShare,
+  onClose,
+}: {
+  visible: boolean;
+  story: Story;
+  fg: string;
+  bg: string;
+  lang: Lang;
+  hint: string;
+  cancelLabel: string;
+  onShare: () => void;
+  onClose: () => void;
+}) {
+  const title = lang === 'tr' ? 'Paylaşmaya hazır' : 'Ready to share';
+  const shareLabel = lang === 'tr' ? 'Paylaş' : 'Share';
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+      <View style={styles.sheetBackdrop}>
+        <Pressable style={ABS_FILL} onPress={onClose} accessibilityLabel={cancelLabel} />
+        <View style={styles.sheet}>
+          <View style={styles.sheetHandle} />
+          <Text style={styles.sheetTitle}>{title}</Text>
+          <View style={styles.previewFrame}>
+            <View style={styles.previewInner} pointerEvents="none">
+              <StoryCardBody story={story} glowId="storyGlowPreview" />
+            </View>
+          </View>
+          <View style={styles.sheetHint}>
+            <Ionicons name="link-outline" size={18} color={fg} />
+            <Text style={styles.sheetHintText}>{hint}</Text>
+          </View>
+          <Pressable style={[styles.primaryAction, { backgroundColor: fg }]} onPress={onShare}>
+            <Ionicons name="share-social-outline" size={18} color="#ffffff" />
+            <Text style={styles.primaryActionText}>{shareLabel}</Text>
+          </Pressable>
+          <Pressable style={styles.sheetCancel} onPress={onClose}>
+            <Text style={styles.sheetCancelText}>{cancelLabel}</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -1193,6 +1268,7 @@ export default function HomeScreen() {
   const silentRefresh = useRef(false);
   const lastEnough = useRef(false);
   const shareRef = useRef<View>(null);
+  const [sharePreviewOpen, setSharePreviewOpen] = useState(false);
 
   const [activeCount, setActiveCount] = useState<number | null>(null);
   const [dashboardOpen, setDashboardOpen] = useState(false);
@@ -1236,6 +1312,8 @@ export default function HomeScreen() {
 
   useEffect(() => {
     if (ready && fontsLoaded) {
+      // Yerel açılış ekranını, kendi açılış animasyonumuz çizilmeye hazır olunca kapat
+      SplashScreen.hideAsync().catch(() => {});
       const t = setTimeout(() => setSplashDone(true), SPLASH_MS);
       return () => clearTimeout(t);
     }
@@ -1438,33 +1516,33 @@ export default function HomeScreen() {
     );
   }
 
+  // Paylaş butonu: önce önizleme panelini aç
+  function openSharePreview() {
+    if (!selected) return;
+    tap();
+    setSharePreviewOpen(true);
+  }
+
+  // Önizlemede "Paylaş": paneli kapat, kapanış animasyonu bitince görseli üret ve paylaş
   async function shareStory() {
     if (!selected || !shareRef.current) return;
     tap();
-    // İlk paylaşımda bağlantı çıkartması hatırlatması (bir kez gösterilir)
+    setSharePreviewOpen(false);
+    await new Promise((r) => setTimeout(r, 400));
     try {
-      const seen = await AsyncStorage.getItem('storyHintSeen');
-      if (!seen) {
-        await AsyncStorage.setItem('storyHintSeen', '1');
-        await new Promise<void>((resolve) =>
-          Alert.alert(tx.storyHintTitle, tx.storyHintText, [{ text: tx.ok, onPress: () => resolve() }], {
-            cancelable: true,
-            onDismiss: () => resolve(),
-          })
-        );
-      }
-    } catch {}
-    try {
+      // iOS'ta width/height "nokta" cinsinden alınıp ekran ölçeğiyle çarpılıyor
+      // (3x ekranda 1080 → 3240 piksel, ~12 MB). Ölçeğe bölerek gerçek 1080x1920 elde ediyoruz.
+      const scale = Platform.OS === 'ios' ? PixelRatio.get() : 1;
       const uri = await captureRef(shareRef, {
-        format: 'png',
-        quality: 1,
+        format: 'jpg',
+        quality: 0.92,
         result: 'tmpfile',
-        width: 1080,
-        height: 1920,
+        width: Math.round(1080 / scale),
+        height: Math.round(1920 / scale),
       });
       const available = await Sharing.isAvailableAsync();
       if (available) {
-        await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: tx.shareDialog });
+        await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: tx.shareDialog });
       } else {
         Alert.alert(tx.shareUnavailableTitle, tx.shareUnavailableText);
       }
@@ -1648,6 +1726,17 @@ export default function HomeScreen() {
       );
     }
 
+
+    const story: Story | null = selected
+      ? buildStory({
+          activityId: selected.id,
+          lang,
+          pct: resultShown ? pct : null,
+          filter,
+          value: filter === 'world' ? null : (value as string | null | undefined),
+        })
+      : null;
+
     return (
       <SafeAreaView style={[styles.safe, { backgroundColor: bg }]}>
         <StatusBar style="dark" />
@@ -1724,7 +1813,7 @@ export default function HomeScreen() {
 
           <View style={styles.buttonsCol}>
             {resultShown || noData ? (
-              <Pressable style={[styles.primaryAction, { backgroundColor: fg }]} onPress={shareStory}>
+              <Pressable style={[styles.primaryAction, { backgroundColor: fg }]} onPress={openSharePreview}>
                 <Ionicons name="share-social-outline" size={18} color="#ffffff" />
                 <Text style={styles.primaryActionText}>{tx.shareActivity}</Text>
               </Pressable>
@@ -1741,17 +1830,21 @@ export default function HomeScreen() {
           </View>
         </FadeIn>
 
-        {resultShown || noData ? (
-          <StoryCard
-            innerRef={shareRef}
-            story={buildStory({
-              activityId: selected.id,
-              lang,
-              pct: resultShown ? pct : null,
-              filter,
-              value: filter === 'world' ? null : (value as string | null | undefined),
-            })}
-          />
+        {(resultShown || noData) && story ? (
+          <>
+            <StoryCard innerRef={shareRef} story={story} />
+            <SharePreviewSheet
+              visible={sharePreviewOpen}
+              story={story}
+              fg={fg}
+              bg={bg}
+              lang={lang}
+              hint={tx.storyHintText}
+              cancelLabel={tx.cancel}
+              onShare={shareStory}
+              onClose={() => setSharePreviewOpen(false)}
+            />
+          </>
         ) : null}
 
         {notifPrompt ? (
@@ -2376,6 +2469,48 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   storyBrandText: { fontFamily: F.bold, fontSize: 12.5, color: '#ffffff' },
+
+  // Paylaşım önizleme paneli
+  sheetBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(10,20,30,0.45)' },
+  sheet: {
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: SP.xl,
+    paddingTop: SP.sm + 2,
+    paddingBottom: SP.xxl + SP.sm,
+  },
+  sheetHandle: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: '#d4d4d8', marginBottom: SP.lg },
+  sheetTitle: { textAlign: 'center', fontFamily: F.bold, fontSize: 19, color: INK, marginBottom: SP.lg },
+  previewFrame: {
+    alignSelf: 'center',
+    width: PREVIEW_W,
+    height: Math.round(STORY_H * PREVIEW_SCALE),
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: STORY_BG,
+  },
+  previewInner: {
+    position: 'absolute',
+    width: STORY_W,
+    height: STORY_H,
+    left: (PREVIEW_W - STORY_W) / 2,
+    top: (STORY_H * PREVIEW_SCALE - STORY_H) / 2,
+    transform: [{ scale: PREVIEW_SCALE }],
+  },
+  sheetHint: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SP.sm,
+    marginVertical: SP.lg,
+    paddingVertical: SP.md,
+    paddingHorizontal: SP.md + 2,
+    backgroundColor: '#F4F4F5',
+    borderRadius: 14,
+  },
+  sheetHintText: { flex: 1, fontFamily: F.regular, fontSize: 13.5, lineHeight: 19, color: SOFT },
+  sheetCancel: { alignItems: 'center', paddingTop: SP.md },
+  sheetCancelText: { fontFamily: F.medium, fontSize: 15, color: FAINT },
 
   dashSafe: { flex: 1, backgroundColor: LOGO_NAVY },
   dashContainer: { flex: 1, padding: SP.xl },

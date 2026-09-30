@@ -21,7 +21,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Defs, LinearGradient, RadialGradient, Rect, Stop, Svg } from 'react-native-svg';
+import { Circle, Defs, LinearGradient, Path, RadialGradient, Rect, Stop, Svg } from 'react-native-svg';
 import {
   Armchair,
   Barbell,
@@ -538,25 +538,50 @@ function Sparkles({ color }: { color: string }) {
   );
 }
 
-const LOGO_POINTS: { x: number; y: number; big?: boolean }[] = [
-  { x: 120, y: 92 },
-  { x: 158, y: 70 },
-  { x: 200, y: 64 },
-  { x: 242, y: 76 },
-  { x: 272, y: 106 },
-  { x: 282, y: 146 },
-  { x: 266, y: 184 },
-  { x: 238, y: 214 },
-  { x: 214, y: 246 },
-  { x: 200, y: 280 },
-  { x: 200, y: 320, big: true },
+// Logo figürleri — ajansın son logosundan (1024×1024 SVG koordinatları).
+// Her figür: baş (daire) + gövde (yarım elips).
+type LogoFigure = { cx: number; cy: number; r: number; bx: number; by: number; rx: number; ry: number };
+const LOGO_FIGURES: LogoFigure[] = [
+  { cx: 322.22, cy: 239.63, r: 17.57, bx: 286.2, by: 292.35, rx: 36.02, ry: 33.39 },
+  { cx: 400.42, cy: 172.86, r: 17.57, bx: 364.39, by: 225.57, rx: 36.02, ry: 33.39 },
+  { cx: 504.97, cy: 150.89, r: 17.57, bx: 468.95, by: 203.61, rx: 36.02, ry: 33.39 },
+  { cx: 609.53, cy: 173.73, r: 17.57, bx: 573.5, by: 226.45, rx: 36.02, ry: 33.39 },
+  { cx: 680.69, cy: 259.84, r: 17.57, bx: 644.67, by: 312.55, rx: 36.02, ry: 33.39 },
+  { cx: 703.54, cy: 356.49, r: 17.57, bx: 667.51, by: 409.2, rx: 36.02, ry: 33.39 },
+  { cx: 636.76, cy: 440.83, r: 17.57, bx: 600.74, by: 493.55, rx: 36.02, ry: 33.39 },
+  { cx: 556.81, cy: 516.39, r: 17.57, bx: 520.79, by: 569.11, rx: 36.02, ry: 33.39 },
+  { cx: 508.49, cy: 603.38, r: 17.57, bx: 472.46, by: 656.09, rx: 36.02, ry: 33.39 },
+  { cx: 506.73, cy: 691.24, r: 17.57, bx: 470.71, by: 743.95, rx: 36.02, ry: 33.39 },
+  { cx: 504.09, cy: 813.36, r: 26.36, bx: 450.06, by: 892.44, rx: 54.03, ry: 50.08 },
 ];
-const LOGO_BOX = 380;
-const LOGO_CANVAS = 176;
+// Logonun çevresindeki kare alan (1024'lük koordinatlarda)
+const LOGO_BOX_X = 42;
+const LOGO_BOX_Y = 86;
+const LOGO_BOX = 943;
+const LOGO_CANVAS = 210;
 const LOGO_SCALE = LOGO_CANVAS / LOGO_BOX;
 
+function LogoFigureShape({ f }: { f: LogoFigure }) {
+  // Figürün kendi sınırları
+  const minX = f.bx;
+  const maxX = f.bx + f.rx * 2;
+  const minY = f.cy - f.r;
+  const maxY = f.by;
+  const w = (maxX - minX) * LOGO_SCALE;
+  const h = (maxY - minY) * LOGO_SCALE;
+  return (
+    <Svg width={w} height={h} viewBox={`${minX} ${minY} ${maxX - minX} ${maxY - minY}`}>
+      <Circle cx={f.cx} cy={f.cy} r={f.r} fill="#ffffff" />
+      <Path
+        d={`M${f.bx} ${f.by}A${f.rx} ${f.ry} 0 0 1 ${f.bx + f.rx * 2} ${f.by}Z`}
+        fill="#ffffff"
+      />
+    </Svg>
+  );
+}
+
 function SplashLogo() {
-  const anims = useRef(LOGO_POINTS.map(() => new Animated.Value(0))).current;
+  const anims = useRef(LOGO_FIGURES.map(() => new Animated.Value(0))).current;
   const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -595,17 +620,16 @@ function SplashLogo() {
           transform: [{ scale: pulseScale }],
         }}
       />
-      {LOGO_POINTS.map((p, i) => {
+      {LOGO_FIGURES.map((f, i) => {
         const v = anims[i];
-        const angle = (i / LOGO_POINTS.length) * Math.PI * 2;
+        const angle = (i / LOGO_FIGURES.length) * Math.PI * 2;
         const fromX = Math.cos(angle) * 130;
         const fromY = Math.sin(angle) * 130;
         const translateX = v.interpolate({ inputRange: [0, 1], outputRange: [fromX, 0] });
         const translateY = v.interpolate({ inputRange: [0, 1], outputRange: [fromY, 0] });
         const opacity = v.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0, 1, 1] });
-        const iconSize = (p.big ? 30 : 20) * LOGO_SCALE * 2.1;
-        const left = p.x * LOGO_SCALE - iconSize / 2;
-        const top = p.y * LOGO_SCALE - iconSize / 2;
+        const left = (f.bx - LOGO_BOX_X) * LOGO_SCALE;
+        const top = (f.cy - f.r - LOGO_BOX_Y) * LOGO_SCALE;
         return (
           <Animated.View
             key={i}
@@ -617,7 +641,7 @@ function SplashLogo() {
               transform: [{ translateX }, { translateY }],
             }}
           >
-            <Ionicons name="person" size={iconSize} color="#ffffff" />
+            <LogoFigureShape f={f} />
           </Animated.View>
         );
       })}

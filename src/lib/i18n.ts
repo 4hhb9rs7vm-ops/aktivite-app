@@ -53,6 +53,7 @@ const ACTIVITY_NAMES: Record<string, { tr: string; en: string }> = {
   procrastinating: { tr: 'Erteliyorum', en: 'Procrastinating' },
   nothing: { tr: 'Boş boş oturuyorum', en: 'Just sitting around' },
   money: { tr: 'Borçları düşünüyorum', en: 'Worrying about debts' },
+  sick: { tr: 'Hastayım', en: "I'm sick" },
 };
 
 export function activityName(id: string, lang: Lang): string {

@@ -174,6 +174,12 @@ export const STORY_TEXTS: Record<string, StoryText> = {
     tr: { ben: "Şu an borçlarımı düşünüyorum.", q: "kimler borçlarını düşünüyor?", team: "Hesap kitap ekibi", s: ["Bugün borç düşünen çok. Yalnız değiliz.", "Borçlarımı düşünüyorum ama yalnız değilim.", "Az kişiyiz, ama hesap bir gün tutacak.", "Umarım yalnız değilimdir."] },
     en: { ben: "Right now I'm worrying about debts.", q: "Who's worrying about debts", team: "Team Budget", s: ["Many of us are worrying today. We're not alone.", "Worrying, but not alone.", "Few of us, and the math will work out one day.", "Hopefully I'm not alone."] },
   },
+  sick: {
+    emoji: "🤒",
+    color: 'sky',
+    tr: { ben: "Şu an hastayım.", q: "kimler hasta?", team: "Battaniye ekibi", s: ["Bugün herkes hasta, mevsim bu.", "Hastayım ama yalnız değilim.", "Herkes ayakta, bir ben battaniyenin altındayım.", "Başka hasta olan var mı?"] },
+    en: { ben: "Right now I'm sick.", q: "Who's sick", team: "Team Blanket", s: ["Everyone's sick today. It's the season.", "Sick, but not alone.", "Everyone's up, I'm under a blanket.", "Anyone else feeling sick?"] },
+  },
 };
 
 // ---- Türkçe ek yardımcıları ----

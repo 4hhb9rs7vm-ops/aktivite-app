@@ -12,6 +12,7 @@ import {
   ScrollView,
   StyleProp,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -50,10 +51,12 @@ import {
   SmileyAngry,
   SmileySad,
   Television,
+  Thermometer,
   UsersThree,
   Wallet,
 } from 'phosphor-react-native';
 import * as Haptics from 'expo-haptics';
+import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Localization from 'expo-localization';
 import { captureRef } from 'react-native-view-shot';
@@ -92,7 +95,14 @@ import {
   scheduleDailyMoments,
 } from '@/lib/notifications';
 
-const SESSION_MS = 60 * 60 * 1000;
+// Seçim kilidi: kullanıcı yarım saatte bir yeni an seçebilir.
+// Not: kişinin istatistikte sayıldığı süre (şu an 60 dk) Supabase fonksiyonlarında ayarlanır, burada değil.
+const SESSION_MS = 30 * 60 * 1000;
+// Gece modu: 23:00 – 05:00 arası daha yumuşak mesajlar gösterilir
+function isNight(d = new Date()) {
+  const h = d.getHours();
+  return h >= 23 || h < 5;
+}
 const INSTA_HANDLE = '@suan.app';
 const SPLASH_MS = 3500;
 const PRIVACY_URLS: Record<Lang, string> = {
@@ -105,6 +115,94 @@ const HERO_COUNT_THRESHOLD = 1000; // Bu sayının üstünde aktif kişi sayıs�
 const RATIO_POLL_MS = 40 * 1000; // Veri yokken oran bu aralıkla yeniden kontrol edilir
 const NOTIF_ASKED_KEY = 'notif_asked_v2';
 const NOTIF_ASK_DELAY_MS = 2500;
+// Yarım saatte tek an kuralı: seçilen an SESSION_MS boyunca kilitli kalır.
+// İlk birkaç dakika yanlış seçimi düzeltmek için değiştirme hakkı var.
+// İleride premium kullanıcılar için bu sayı artırılabilir (ör. 3-4).
+const FREE_MOMENTS_PER_HOUR = 1;
+const CHANGE_GRACE_MS = 2 * 60 * 1000;
+const LOCK_KEY = 'current_moment_v1';
+type MomentLock = { id: string; startedAt: number };
+
+// An geçmişi: sadece telefonda tutulur, sunucuya gönderilmez
+const HISTORY_KEY = 'moment_history_v1';
+// "An bitince haber ver" tercihi ve planlanan bildirimin kimliği
+const END_NOTIFY_KEY = 'moment_end_notify_v1';
+const END_NOTIF_ID_KEY = 'moment_end_notif_id_v1';
+const END_NOTIF_COUNT_KEY = 'moment_end_notif_count_v1';
+
+async function cancelMomentEndNotification() {
+  try {
+    const id = await AsyncStorage.getItem(END_NOTIF_ID_KEY);
+    if (!id) return;
+    // Henüz gönderilmemiş bir bildirim iptal ediliyorsa günlük hakkı geri ver
+    const pending = await Notifications.getAllScheduledNotificationsAsync().catch(() => []);
+    if (pending.some((n) => n.identifier === id)) {
+      await Notifications.cancelScheduledNotificationAsync(id);
+      const raw = await AsyncStorage.getItem(END_NOTIF_COUNT_KEY);
+      const saved = raw ? JSON.parse(raw) : null;
+      if (saved && saved.count > 0) {
+        await AsyncStorage.setItem(END_NOTIF_COUNT_KEY, JSON.stringify({ ...saved, count: saved.count - 1 }));
+      }
+    }
+    await AsyncStorage.removeItem(END_NOTIF_ID_KEY);
+  } catch {}
+}
+
+// Sınırlar: günde en fazla 2 "an bitti" bildirimi, sadece 09:00 – 20:00 arasında
+const END_NOTIF_DAILY_MAX = 2;
+const END_NOTIF_FROM_HOUR = 9;
+const END_NOTIF_UNTIL_HOUR = 20;
+
+async function scheduleMomentEndNotification(endsAt: number, lang: Lang) {
+  await cancelMomentEndNotification();
+  const seconds = Math.round((endsAt - Date.now()) / 1000);
+  if (seconds < 5) return;
+  const end = new Date(endsAt);
+  const h = end.getHours();
+  if (h < END_NOTIF_FROM_HOUR || h >= END_NOTIF_UNTIL_HOUR) return;
+  const day = `${end.getFullYear()}-${end.getMonth() + 1}-${end.getDate()}`;
+  let used = 0;
+  try {
+    const raw = await AsyncStorage.getItem(END_NOTIF_COUNT_KEY);
+    const saved = raw ? JSON.parse(raw) : null;
+    if (saved && saved.day === day) used = saved.count || 0;
+  } catch {}
+  if (used >= END_NOTIF_DAILY_MAX) return;
+  try {
+    const tr = lang === 'tr';
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: tr ? 'Yeni anın hazır' : 'Your next moment is ready',
+        body: tr ? 'Yarım saat geçti. Şu an ne yapıyorsun?' : "Half an hour has passed. What are you up to now?",
+      },
+      trigger: { type: 'timeInterval', seconds, repeats: false } as any,
+    });
+    await AsyncStorage.setItem(END_NOTIF_ID_KEY, id);
+    await AsyncStorage.setItem(END_NOTIF_COUNT_KEY, JSON.stringify({ day, count: used + 1 }));
+  } catch {}
+}
+const HISTORY_MAX = 600;
+type MomentEntry = { id: string; at: number; guess: number | null; pct: number | null };
+
+function dayKey(ts: number) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+// Seri: bugün (ya da henüz bugün seçim yoksa dün) geriye doğru kesintisiz günler
+function computeStreak(history: MomentEntry[]) {
+  const days = new Set(history.map((h) => dayKey(h.at)));
+  const today = new Date();
+  const doneToday = days.has(dayKey(today.getTime()));
+  let cursor = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  if (!doneToday) cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() - 1);
+  let count = 0;
+  while (days.has(dayKey(cursor.getTime()))) {
+    count++;
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() - 1);
+  }
+  return { count, doneToday };
+}
 
 const F = { regular: 'DMSans_400Regular', medium: 'DMSans_500Medium', bold: 'DMSans_700Bold' };
 const INK = '#16161a';
@@ -191,6 +289,7 @@ const ACTIVITIES: Activity[] = [
   { id: 'bored', name: 'Sıkılıyorum', icon: SmileySad, ...PALETTE.indigo, world: 7, country: 5, peaks: [{ hour: 15, spread: 5 }], mood: true },
   { id: 'procrastinating', name: 'Erteliyorum', icon: Hourglass, ...PALETTE.indigo, world: 8, country: 6, peaks: [{ hour: 15, spread: 4 }], mood: true },
   { id: 'nothing', name: 'Boş boş oturuyorum', icon: Armchair, ...PALETTE.indigo, world: 6, country: 5, peaks: [{ hour: 16, spread: 5 }], mood: true },
+  { id: 'sick', name: 'Hastayım', icon: Thermometer, ...PALETTE.indigo, world: 4, country: 4, peaks: [{ hour: 10, spread: 6 }], mood: true },
   { id: 'money', name: 'Borçları düşünüyorum', icon: Wallet, ...PALETTE.indigo, world: 5, country: 4, peaks: [{ hour: 21, spread: 4 }], mood: true },
 ];
 
@@ -1269,6 +1368,347 @@ function DashboardScreen({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Tahmin adımı: sonuç açılmadan önce tek dokunuşla hızlı bir tahmin
+// ---------------------------------------------------------------------------
+type GuessBucket = { min: number; max: number; tr: string; en: string; trSub: string; enSub: string };
+const GUESS_BUCKETS: GuessBucket[] = [
+  { min: 0, max: 1, tr: "%1'den az", en: 'Under 1%', trSub: 'Çok az kişi', enSub: 'Hardly anyone' },
+  { min: 1, max: 5, tr: '%1 – 5', en: '1 – 5%', trSub: 'Birkaç kişi', enSub: 'A few' },
+  { min: 5, max: 15, tr: '%5 – 15', en: '5 – 15%', trSub: 'Epey kişi', enSub: 'Quite a lot' },
+  { min: 15, max: 101, tr: "%15'ten fazla", en: 'Over 15%', trSub: 'Çok kalabalık', enSub: 'Crowded' },
+];
+
+function bucketLabel(i: number, lang: Lang) {
+  const b = GUESS_BUCKETS[i];
+  return lang === 'tr' ? b.tr : b.en;
+}
+
+function guessOutcome(i: number, pct: number): 'hit' | 'tooHigh' | 'tooLow' {
+  const b = GUESS_BUCKETS[i];
+  if (pct >= b.min && pct < b.max) return 'hit';
+  return pct < b.min ? 'tooHigh' : 'tooLow';
+}
+
+function bucketOf(pct: number) {
+  const i = GUESS_BUCKETS.findIndex((b) => pct >= b.min && pct < b.max);
+  return i === -1 ? GUESS_BUCKETS.length - 1 : i;
+}
+
+// Tahmin sonucuna göre eğlenceli mesajlar. "far" = iki ya da daha fazla aralık sapma.
+const VERDICTS: Record<'hit' | 'highNear' | 'highFar' | 'lowNear' | 'lowFar', { tr: string[]; en: string[] }> = {
+  hit: {
+    tr: [
+      'Bildin! Dünyayı avucunun içi gibi tanıyorsun.',
+      'Tam isabet! Sezgilerin bayağı kuvvetli.',
+      'Tebrikler, insanları iyi okuyorsun.',
+    ],
+    en: [
+      'Nailed it! You know the world like the back of your hand.',
+      'Bullseye! Your instincts are sharp.',
+      'Well done, you read people well.',
+    ],
+  },
+  highNear: {
+    tr: ['Az kalsın! Sandığından biraz daha azsınız.', 'Yakındı, ama biraz iyimser davrandın.'],
+    en: ["So close! You're a little rarer than you think.", 'Close, but a bit optimistic.'],
+  },
+  highFar: {
+    tr: [
+      'Herkes bunu yapıyor sandın ama sen nadir olanlardansın!',
+      'Vay, sandığından çok daha özelsin.',
+      'Dünya kalabalık ama bu konuda neredeyse yalnızsın.',
+    ],
+    en: [
+      "You thought everyone was doing it, but you're one of the rare ones!",
+      "Wow, you're way more unique than you thought.",
+      "The world is crowded, but you're almost alone on this one.",
+    ],
+  },
+  lowNear: {
+    tr: ['Az kalsın! Sandığından biraz daha kalabalıksınız.', 'Yakındı, seninle aynı şeyi yapan biraz daha fazla kişi var.'],
+    en: ['So close! There are a few more of you than you think.', 'Close! A few more people are with you.'],
+  },
+  lowFar: {
+    tr: [
+      'Sürpriz! Sandığından çok daha kalabalıksınız.',
+      'Yalnız değilsin, hem de hiç!',
+      'Kendini tek sanıyordun, ama dünya seninle aynı şeyi yapıyor.',
+    ],
+    en: [
+      'Surprise! There are way more of you than you think.',
+      "You're not alone. Not even close!",
+      'You thought you were the only one, but the world is right there with you.',
+    ],
+  },
+};
+
+function guessVerdict(i: number, pct: number, lang: Lang, seed: number) {
+  const actual = bucketOf(pct);
+  const gap = Math.abs(i - actual);
+  const key =
+    gap === 0 ? 'hit' : i > actual ? (gap >= 2 ? 'highFar' : 'highNear') : gap >= 2 ? 'lowFar' : 'lowNear';
+  const list = VERDICTS[key][lang === 'tr' ? 'tr' : 'en'];
+  return list[seed % list.length];
+}
+
+function GuessScreen({
+  activity,
+  lang,
+  onSubmit,
+  onSkip,
+  onBack,
+}: {
+  activity: Activity;
+  lang: Lang;
+  onSubmit: (bucket: number) => void;
+  onSkip: () => void;
+  onBack: () => void;
+}) {
+  const { bg, fg } = activity;
+  const tr = lang === 'tr';
+  const [picked, setPicked] = useState<number | null>(null);
+
+  function pick(i: number) {
+    if (picked !== null) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setPicked(i);
+    // Seçimin görünmesi için kısa bir an bekle, sonra sonuca geç
+    setTimeout(() => onSubmit(i), 260);
+  }
+
+  return (
+    <SafeAreaView style={[styles.safe, { backgroundColor: bg }]}>
+      <StatusBar style="dark" />
+      <FadeIn style={gs.container}>
+        <View style={styles.topRow}>
+          <Pressable
+            style={styles.backBtn}
+            accessibilityLabel={tr ? 'Geri' : 'Back'}
+            onPress={() => {
+              tap();
+              onBack();
+            }}
+          >
+            <Ionicons name="arrow-back" size={20} color={INK} />
+          </Pressable>
+          <View style={styles.chip}>
+            <ActivityIcon activity={activity} size={30} iconSize={18} />
+            <Text style={styles.chipText} numberOfLines={1}>
+              {activityName(activity.id, lang)}
+            </Text>
+          </View>
+        </View>
+
+        <View style={gs.middle}>
+          <Text style={gs.question}>
+            {tr ? 'Sence dünyada şu an kaç kişi seninle aynı şeyi yapıyor?' : 'How many people in the world are doing the same right now?'}
+          </Text>
+          <View style={[gs.kickerPill, { backgroundColor: '#ffffff' }]}>
+            <Ionicons name="help-circle" size={18} color={fg} />
+            <Text style={[gs.kicker, { color: fg }]}>
+              {tr ? 'Sonuçları görmeden önce tahmin etmek ister misin?' : 'Want to guess before seeing the results?'}
+            </Text>
+          </View>
+
+          <View style={gs.grid}>
+            {GUESS_BUCKETS.map((b, i) => {
+              const active = picked === i;
+              return (
+                <PressableScale
+                  key={i}
+                  wrapStyle={gs.optionWrap}
+                  style={[gs.option, active && { backgroundColor: fg }]}
+                  onPress={() => pick(i)}
+                >
+                  <Text style={[gs.optionTitle, { color: active ? '#ffffff' : fg }]}>{tr ? b.tr : b.en}</Text>
+                  <Text style={[gs.optionSub, { color: active ? '#ffffff' : fg }]}>{tr ? b.trSub : b.enSub}</Text>
+                </PressableScale>
+              );
+            })}
+          </View>
+
+          <Pressable
+            style={gs.skip}
+            onPress={() => {
+              tap(true);
+              onSkip();
+            }}
+          >
+            <Text style={gs.skipText}>{tr ? 'Tahmin etmeden sonucu gör' : 'Skip and see the result'}</Text>
+          </Pressable>
+        </View>
+      </FadeIn>
+    </SafeAreaView>
+  );
+}
+
+// Sonuç kartında tahmin ile gerçeğin karşılaştırması (sayaç bittikten sonra belirir)
+function GuessCompare({ guess, pct, fg, bg, lang }: { guess: number; pct: number; fg: string; bg: string; lang: Lang }) {
+  const tr = lang === 'tr';
+  const appear = useRef(new Animated.Value(0)).current;
+  const outcome = guessOutcome(guess, pct);
+  const seed = useRef(Math.floor(Math.random() * 1000)).current;
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      Animated.timing(appear, { toValue: 1, duration: 420, easing: EASE, useNativeDriver: true }).start();
+      if (outcome === 'hit') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      else Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    }, 850);
+    return () => clearTimeout(t);
+  }, [guess, pct]);
+
+  return (
+    <Animated.View
+      style={[
+        gs.compare,
+        { backgroundColor: bg },
+        {
+          opacity: appear,
+          transform: [{ translateY: appear.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }],
+        },
+      ]}
+    >
+      <View style={[gs.compareIcon, { backgroundColor: outcome === 'hit' ? fg : '#ffffff' }]}>
+        <Ionicons
+          name={outcome === 'hit' ? 'checkmark' : outcome === 'tooHigh' ? 'arrow-down' : 'arrow-up'}
+          size={18}
+          color={outcome === 'hit' ? '#ffffff' : fg}
+        />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={gs.verdict}>{guessVerdict(guess, pct, lang, seed)}</Text>
+        <Text style={gs.compareSub}>
+          {tr ? 'Tahminin: ' : 'Your guess: '}
+          {bucketLabel(guess, lang)}
+        </Text>
+      </View>
+    </Animated.View>
+  );
+}
+
+const gs = StyleSheet.create({
+  container: { flex: 1, paddingHorizontal: SP.xl, paddingTop: SP.md, paddingBottom: SP.lg },
+  middle: { flex: 1, justifyContent: 'center' },
+  kickerPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: SP.sm,
+    paddingHorizontal: SP.md + 2,
+    paddingVertical: SP.sm,
+    borderRadius: 18,
+    marginBottom: SP.xxl,
+  },
+  kicker: { flexShrink: 1, fontFamily: F.bold, fontSize: FS.md, lineHeight: 20 },
+  question: { fontFamily: F.bold, fontSize: 24, lineHeight: 31, color: INK, marginBottom: SP.lg },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm + 2 },
+  optionWrap: { width: '47%', flexGrow: 1 },
+  option: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    paddingVertical: SP.xl,
+    paddingHorizontal: SP.lg,
+    minHeight: 92,
+    justifyContent: 'center',
+    ...SOFT_SHADOW,
+  },
+  optionTitle: { fontFamily: F.bold, fontSize: FS.lg, color: INK },
+  optionSub: { fontFamily: F.regular, fontSize: FS.sm, marginTop: 2, opacity: 0.8 },
+  skip: { alignSelf: 'center', paddingVertical: SP.md, paddingHorizontal: SP.lg, marginTop: SP.lg },
+  skipText: { fontFamily: F.medium, fontSize: FS.base, color: SOFT, textDecorationLine: 'underline' },
+  compare: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SP.md,
+    borderRadius: 18,
+    padding: SP.lg,
+    marginTop: SP.xl,
+  },
+  compareIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  verdict: { fontFamily: F.bold, fontSize: FS.base, color: INK, lineHeight: 19 },
+  compareSub: { fontFamily: F.regular, fontSize: FS.sm, color: SOFT, marginTop: 2 },
+});
+
+const hs = StyleSheet.create({
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm, marginTop: SP.lg },
+  notifyRow: { flexDirection: 'row', alignItems: 'center', gap: SP.sm, marginTop: SP.sm },
+  notifyText: { fontFamily: F.medium, fontSize: FS.sm, color: INK },
+  notifySub: { fontFamily: F.regular, fontSize: FS.xs, color: SOFT, marginTop: 1 },
+  streakPending: { backgroundColor: 'rgba(255,255,255,0.08)' },
+  lockCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SP.sm + 2,
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    paddingVertical: SP.sm + 2,
+    paddingHorizontal: SP.md,
+    ...SOFT_SHADOW,
+  },
+  lockKicker: { fontFamily: F.medium, fontSize: FS.xs, color: SOFT },
+  lockTitle: { fontFamily: F.bold, fontSize: FS.base, color: INK },
+  lockShare: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F2F3F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lockTime: {
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F2F3F6',
+    borderRadius: 999,
+    paddingHorizontal: SP.sm + 2,
+    paddingVertical: 5,
+  },
+  lockTimeText: { fontFamily: F.medium, fontSize: FS.xs, color: SOFT },
+  noticeBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15,20,35,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: SP.xxl,
+  },
+  noticeCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#ffffff',
+    borderRadius: 24,
+    paddingTop: SP.xxl,
+    paddingBottom: SP.lg,
+    paddingHorizontal: SP.xl,
+    alignItems: 'center',
+    ...CARD_SHADOW,
+  },
+  noticeTitle: { fontFamily: F.bold, fontSize: FS.lg, color: INK, marginTop: SP.md },
+  noticeText: {
+    fontFamily: F.regular,
+    fontSize: FS.base,
+    color: SOFT,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginTop: SP.xs + 2,
+  },
+  noticeButtons: { flexDirection: 'row', gap: SP.sm, marginTop: SP.xl, alignSelf: 'stretch' },
+  noticeGhost: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: SP.sm + 2,
+    alignItems: 'center',
+    backgroundColor: '#F2F3F6',
+  },
+  noticeGhostText: { fontFamily: F.medium, fontSize: FS.sm, color: INK },
+  noticePrimary: { flex: 1, borderRadius: 12, paddingVertical: SP.sm + 2, alignItems: 'center' },
+  noticePrimaryText: { fontFamily: F.medium, fontSize: FS.sm, color: '#ffffff' },
+});
+
 export default function HomeScreen() {
   const [fontsLoaded] = useFonts({ DMSans_400Regular, DMSans_500Medium, DMSans_700Bold });
   const insets = useSafeAreaInsets();
@@ -1301,6 +1741,13 @@ export default function HomeScreen() {
   const [liveRows, setLiveRows] = useState<DashboardRow[] | null>(null);
 
   const [notifPrompt, setNotifPrompt] = useState(false);
+  const [guessing, setGuessing] = useState(false);
+  const [guess, setGuess] = useState<number | null>(null);
+  const [lock, setLock] = useState<MomentLock | null>(null);
+  const [lockNotice, setLockNotice] = useState(false);
+  const [pendingShare, setPendingShare] = useState(false);
+  const [history, setHistory] = useState<MomentEntry[]>([]);
+  const [endNotify, setEndNotify] = useState(false);
   const notifTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -1312,12 +1759,25 @@ export default function HomeScreen() {
   useEffect(() => {
     ensureSession();
     (async () => {
-      const [p, c, l] = await Promise.all([
+      const [p, c, l, lk, hs0, en] = await Promise.all([
         AsyncStorage.getItem('profile'),
         AsyncStorage.getItem('consent'),
         loadLang(),
+        AsyncStorage.getItem(LOCK_KEY),
+        AsyncStorage.getItem(HISTORY_KEY),
+        AsyncStorage.getItem(END_NOTIFY_KEY),
       ]);
       setLang(l);
+      if (en === 'yes') setEndNotify(true);
+      try {
+        const h = hs0 ? JSON.parse(hs0) : [];
+        if (Array.isArray(h)) setHistory(h);
+      } catch {}
+      try {
+        const saved: MomentLock | null = lk ? JSON.parse(lk) : null;
+        if (saved && ACTIVITIES_BY_ID[saved.id] && Date.now() - saved.startedAt < SESSION_MS) setLock(saved);
+        else if (lk) AsyncStorage.removeItem(LOCK_KEY).catch(() => {});
+      } catch {}
       let loadedProfile: Profile = p ? JSON.parse(p) : {};
       if (c === 'yes') setConsent(true);
 
@@ -1438,27 +1898,147 @@ export default function HomeScreen() {
     };
   }, [selected, dashboardOpen]);
 
+  // Dünya oranı geldiğinde geçmişe yaz (haftalık özet için)
+  useEffect(() => {
+    if (!selected || !lock || filter !== 'world') return;
+    if (!ratio?.enough || typeof ratio.pct !== 'number') return;
+    const at = lock.startedAt;
+    const pct = ratio.pct;
+    updateHistory((h) => h.map((e) => (e.at === at && e.id === selected.id && e.pct === null ? { ...e, pct } : e)));
+  }, [ratio, filter, selected, lock]);
+
+  // Ana ekrandaki an kartından "Paylaş": sonucu aç, oran gelince paylaşım önizlemesini göster
+  useEffect(() => {
+    if (!pendingShare || !selected || guessing) return;
+    if (ratio === null && !ratioError) return;
+    // Bayrak zamanlayıcının içinde indirilir; dışarıda indirilirse efekt yeniden çalışıp zamanlayıcıyı iptal ediyordu
+    const t = setTimeout(() => {
+      setPendingShare(false);
+      setSharePreviewOpen(true);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [pendingShare, selected, ratio, ratioError, guessing]);
+
   const sortedActivities = useMemo(() => {
     const main = rankMainActivities(new Date(now), liveRows);
     const mood = ACTIVITIES.filter((a) => a.mood);
     return [...main, ...mood];
   }, [now, liveRows]);
 
+  async function toggleEndNotify(next: boolean) {
+    tap(true);
+    if (!next) {
+      setEndNotify(false);
+      AsyncStorage.setItem(END_NOTIFY_KEY, 'no').catch(() => {});
+      cancelMomentEndNotification();
+      return;
+    }
+    let ok = await hasNotificationPermission().catch(() => false);
+    if (!ok) ok = await requestNotificationPermission().catch(() => false);
+    if (!ok) {
+      const tr = lang === 'tr';
+      Alert.alert(
+        tr ? 'Bildirimler kapalı' : 'Notifications are off',
+        tr
+          ? 'Haber verebilmemiz için telefon ayarlarından Şu An bildirimlerini açman gerekiyor.'
+          : 'To let you know, please turn on notifications for Şu An in your phone settings.',
+        [
+          { text: tx.cancel, style: 'cancel' },
+          { text: tr ? 'Ayarlar' : 'Settings', onPress: () => Linking.openSettings().catch(() => {}) },
+        ]
+      );
+      return;
+    }
+    setEndNotify(true);
+    AsyncStorage.setItem(END_NOTIFY_KEY, 'yes').catch(() => {});
+    if (lock && lockActive()) scheduleMomentEndNotification(lock.startedAt + SESSION_MS, lang);
+  }
+
+  function updateHistory(fn: (h: MomentEntry[]) => MomentEntry[]) {
+    setHistory((prev) => {
+      const next = fn(prev).slice(-HISTORY_MAX);
+      AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }
+
+  function patchEntry(at: number, patch: Partial<MomentEntry>) {
+    updateHistory((h) => h.map((e) => (e.at === at ? { ...e, ...patch } : e)));
+  }
+
+  function lockActive(l: MomentLock | null = lock) {
+    return !!l && Date.now() - l.startedAt < SESSION_MS;
+  }
+
+  function inGrace(l: MomentLock | null = lock) {
+    return !!l && Date.now() - l.startedAt < CHANGE_GRACE_MS;
+  }
+
+  // Kilitli anın sonucunu yeniden aç (yeni kayıt atmadan, tahmin adımı olmadan)
+  function reopenMoment(l: MomentLock) {
+    const a = ACTIVITIES_BY_ID[l.id];
+    if (!a) return;
+    tap();
+    setSelected(a);
+    setStartedAt(l.startedAt);
+    setNow(Date.now());
+    setFilter('world');
+    setEditing(false);
+    setRatio(null);
+    setGuessing(false);
+    setRefreshKey((k) => k + 1);
+  }
+
   function selectActivity(a: Activity) {
+    if (lockActive()) {
+      if (lock!.id === a.id) {
+        reopenMoment(lock!);
+        return;
+      }
+      if (!inGrace()) {
+        tap(true);
+        setLockNotice(true);
+        return;
+      }
+    }
     tap();
     const t = Date.now();
+    const next: MomentLock = { id: a.id, startedAt: t };
+    setLock(next);
+    AsyncStorage.setItem(LOCK_KEY, JSON.stringify(next)).catch(() => {});
+    const firstToday = !history.some((e) => dayKey(e.at) === dayKey(t));
+    updateHistory((h) => [...h, { id: a.id, at: t, guess: null, pct: null }]);
+    if (endNotify) scheduleMomentEndNotification(t + SESSION_MS, lang);
+    if (firstToday && computeStreak(history).count >= 1) {
+      // Seri bir gün daha uzadı
+      setTimeout(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}), 300);
+    }
     setSelected(a);
     setStartedAt(t);
     setNow(t);
     setFilter('world');
     setEditing(false);
     setRatio(null);
+    setGuess(null);
+    setGuessing(true);
     pushPresence(a.id, profile, consent).then(() => setRefreshKey((k) => k + 1));
     shouldAskNotifications().then((ask) => {
       if (!ask) return;
       if (notifTimer.current) clearTimeout(notifTimer.current);
       notifTimer.current = setTimeout(() => setNotifPrompt(true), NOTIF_ASK_DELAY_MS);
     });
+  }
+
+  // Ana ekrana dön ama anı kilitli tut
+  function goHome() {
+    if (notifTimer.current) clearTimeout(notifTimer.current);
+    setNotifPrompt(false);
+    setSelected(null);
+    setStartedAt(null);
+    setEditing(false);
+    setFilter('world');
+    setRatio(null);
+    setGuessing(false);
   }
 
   function acceptNotifications() {
@@ -1480,12 +2060,22 @@ export default function HomeScreen() {
 
   function changeActivity() {
     if (notifTimer.current) clearTimeout(notifTimer.current);
+    // İlk dakikalardaki "yanlış seçim" düzeltmesi geçmişe yazılmasın
+    if (lock && inGrace(lock)) {
+      const at = lock.startedAt;
+      updateHistory((h) => h.filter((e) => e.at !== at));
+      cancelMomentEndNotification();
+    }
     setNotifPrompt(false);
     setSelected(null);
     setStartedAt(null);
     setEditing(false);
     setFilter('world');
     setRatio(null);
+    setGuess(null);
+    setGuessing(false);
+    setLock(null);
+    AsyncStorage.removeItem(LOCK_KEY).catch(() => {});
   }
 
   function saveProfile(next: Profile) {
@@ -1516,19 +2106,24 @@ export default function HomeScreen() {
   }
 
   function resetAll() {
+    const tr = lang === 'tr';
     Alert.alert(
-      tx.resetTitle,
-      tx.resetText,
+      tr ? 'Verilerini sil' : 'Delete your data',
+      tr
+        ? 'Profil bilgilerin, an geçmişin ve serin kalıcı olarak silinecek. Bu işlem geri alınamaz.'
+        : 'Your profile, moment history and streak will be permanently deleted. This cannot be undone.',
       [
         { text: tx.cancel, style: 'cancel' },
         {
           text: tx.delete,
           style: 'destructive',
           onPress: async () => {
-            await AsyncStorage.multiRemove(['profile', 'consent']);
+            // Not: 30 dakikalık seçim kilidi bilinçli olarak silinmez (kişisel veri değil, kural sayacı)
+            await AsyncStorage.multiRemove(['profile', 'consent', HISTORY_KEY]);
             await clearPresence();
             setProfile({});
             setConsent(false);
+            setHistory([]);
             setSelected(null);
             setStartedAt(null);
             setEditing(false);
@@ -1604,6 +2199,26 @@ export default function HomeScreen() {
         onBack={() => setDashboardOpen(false)}
         tx={tx}
         lang={lang}
+      />
+    );
+  }
+
+  if (selected && guessing) {
+    return (
+      <GuessScreen
+        key={selected.id}
+        activity={selected}
+        lang={lang}
+        onSubmit={(v) => {
+          setGuess(v);
+          setGuessing(false);
+          if (lock) patchEntry(lock.startedAt, { guess: v });
+        }}
+        onSkip={() => {
+          setGuess(null);
+          setGuessing(false);
+        }}
+        onBack={goHome}
       />
     );
   }
@@ -1729,6 +2344,9 @@ export default function HomeScreen() {
               </View>
               <Text style={styles.peopleText}>{tx.amongUsers}</Text>
             </View>
+            {guess !== null && filter === 'world' ? (
+              <GuessCompare key={selected.id + '-' + guess} guess={guess} pct={pct} fg={fg} bg={bg} lang={lang} />
+            ) : null}
           </View>
         </View>
       );
@@ -1743,8 +2361,23 @@ export default function HomeScreen() {
             <View style={[styles.noDataIcon, { backgroundColor: bg }]}>
               <UsersThree size={32} color={fg} weight="duotone" />
             </View>
-            <Text style={styles.noDataTitle}>{tx.firstTitle}</Text>
-            <Text style={styles.note}>{tx.firstNote}</Text>
+            <Text style={styles.noDataTitle}>
+              {isNight() ? (lang === 'tr' ? 'Gece sakin' : 'The night is quiet') : tx.firstTitle}
+            </Text>
+            <Text style={styles.note}>
+              {isNight()
+                ? lang === 'tr'
+                  ? 'Bu saatte uyanık olanlar azınlıkta. Ortalık kalabalıklaştıkça oranın burada belirecek.'
+                  : "Few people are awake right now. Your ratio will appear here as things get busier."
+                : tx.firstNote}
+            </Text>
+            {guess !== null && filter === 'world' ? (
+              <Text style={[styles.note, { color: SOFT }]}>
+                {lang === 'tr'
+                  ? `Tahminin: ${bucketLabel(guess, lang)}. Yeterli kişi toplanınca burada karşılaştıracağız.`
+                  : `Your guess: ${bucketLabel(guess, lang)}. We'll compare it here once enough people join.`}
+              </Text>
+            ) : null}
           </View>
         </View>
       );
@@ -1770,7 +2403,7 @@ export default function HomeScreen() {
               style={styles.backBtn}
               onPress={() => {
                 tap();
-                changeActivity();
+                goHome();
               }}
             >
               <Ionicons name="arrow-back" size={20} color={INK} />
@@ -1822,8 +2455,10 @@ export default function HomeScreen() {
 
           <View style={styles.timerBox}>
             <View style={styles.timerLabels}>
-              <Text style={styles.timerText}>{tx.validFor(remainingMin)}</Text>
-              <Text style={styles.timerText}>{tx.sixtyMin}</Text>
+              <Text style={styles.timerText}>
+                {lang === 'tr' ? `Yeni an ${Math.max(1, remainingMin)} dk sonra` : `New moment in ${Math.max(1, remainingMin)} min`}
+              </Text>
+              <Text style={styles.timerText}>{lang === 'tr' ? '30 dk' : '30 min'}</Text>
             </View>
             <View style={styles.timerTrack}>
               <View
@@ -1831,6 +2466,22 @@ export default function HomeScreen() {
                   styles.timerFill,
                   { width: `${Math.max(0, Math.min(100, 100 - (elapsed / SESSION_MS) * 100))}%`, backgroundColor: fg },
                 ]}
+              />
+            </View>
+            <View style={hs.notifyRow}>
+              <Ionicons name={endNotify ? 'notifications' : 'notifications-outline'} size={16} color={endNotify ? fg : SOFT} />
+              <View style={{ flex: 1 }}>
+                <Text style={hs.notifyText}>{lang === 'tr' ? 'An bitince bana haber ver' : 'Notify me when my moment ends'}</Text>
+                <Text style={hs.notifySub}>{lang === 'tr' ? 'Günde en fazla 2 kez, 09:00 – 20:00' : 'Up to twice a day, 9 AM – 8 PM'}</Text>
+              </View>
+              <Switch
+                value={endNotify}
+                onValueChange={toggleEndNotify}
+                trackColor={{ false: '#D9DBE1', true: fg }}
+                thumbColor="#ffffff"
+                ios_backgroundColor="#D9DBE1"
+                style={{ transform: [{ scale: 0.85 }] }}
+                accessibilityLabel={lang === 'tr' ? 'An bitince bana haber ver' : 'Notify me when my moment ends'}
               />
             </View>
           </View>
@@ -1842,15 +2493,27 @@ export default function HomeScreen() {
                 <Text style={styles.primaryActionText}>{tx.shareActivity}</Text>
               </Pressable>
             ) : null}
-            <Pressable
-              style={styles.secondaryAction}
-              onPress={() => {
-                tap();
-                changeActivity();
-              }}
-            >
-              <Text style={styles.buttonText}>{tx.changeActivity}</Text>
-            </Pressable>
+            {inGrace() ? (
+              <Pressable
+                style={styles.secondaryAction}
+                onPress={() => {
+                  tap();
+                  changeActivity();
+                }}
+              >
+                <Text style={styles.buttonText}>{tx.changeActivity}</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                style={styles.secondaryAction}
+                onPress={() => {
+                  tap();
+                  goHome();
+                }}
+              >
+                <Text style={styles.buttonText}>{lang === 'tr' ? 'Ana ekrana dön' : 'Back to home'}</Text>
+              </Pressable>
+            )}
           </View>
         </FadeIn>
 
@@ -1891,6 +2554,10 @@ export default function HomeScreen() {
   const moods = sortedActivities.filter((a) => a.mood);
   const showHeroCount = activeCount !== null && activeCount >= HERO_COUNT_THRESHOLD;
   const part = dayPart(lang);
+  const night = isNight(new Date(now));
+  const streak = computeStreak(history);
+  const lockVisible = !!lock && lockActive() && !!ACTIVITIES_BY_ID[lock.id];
+  const lockLeft = lock ? Math.max(1, Math.ceil((SESSION_MS - (Date.now() - lock.startedAt)) / 60000)) : 0;
 
   return (
     <View style={styles.homeRoot}>
@@ -1915,18 +2582,114 @@ export default function HomeScreen() {
                 </>
               )}
             </View>
-            <Text style={styles.heroTitle}>
-              {tx.heroBefore}
-              <Text style={styles.heroAccent}>{tx.heroAccent}</Text>
-              {tx.heroAfter}
-            </Text>
-            <View style={styles.momentChip}>
-              <Ionicons name="notifications-outline" size={15} color="#ffffff" />
-              <Text style={styles.momentText}>{momentLabel(getTodayMoment(), lang)}</Text>
+            {night ? (
+              <Text style={styles.heroTitle}>
+                {lang === 'tr' ? 'Gece kuşları burada. ' : 'Night owls are here. '}
+                <Text style={styles.heroAccent}>{lang === 'tr' ? 'Sen' : 'What are you'}</Text>
+                {lang === 'tr' ? ' ne yapıyorsun?' : ' up to?'}
+              </Text>
+            ) : (
+              <Text style={styles.heroTitle}>
+                {tx.heroBefore}
+                <Text style={styles.heroAccent}>{tx.heroAccent}</Text>
+                {tx.heroAfter}
+              </Text>
+            )}
+            <View style={hs.chipRow}>
+              <View style={[styles.momentChip, { marginTop: 0 }]}>
+                <Ionicons name="notifications-outline" size={15} color="#ffffff" />
+                <Text style={styles.momentText}>{momentLabel(getTodayMoment(), lang)}</Text>
+              </View>
+              {streak.count >= 1 ? (
+                <View style={[styles.momentChip, { marginTop: 0 }, !streak.doneToday && hs.streakPending]}>
+                  <Ionicons name="flame" size={15} color={streak.doneToday ? '#FDBA74' : 'rgba(255,255,255,0.6)'} />
+                  <Text style={styles.momentText}>
+                    {streak.count === 1
+                      ? lang === 'tr'
+                        ? 'Seri başladı'
+                        : 'Streak started'
+                      : lang === 'tr'
+                        ? `${streak.count} günlük seri`
+                        : `${streak.count}-day streak`}
+                    {!streak.doneToday ? (lang === 'tr' ? ' · bugün devam et' : ' · keep it today') : ''}
+                  </Text>
+                </View>
+              ) : null}
             </View>
           </View>
 
           <View style={styles.homeBody}>
+            {lockVisible ? (
+              <PressableScale wrapStyle={{ marginTop: SP.lg }} style={hs.lockCard} onPress={() => reopenMoment(lock!)}>
+                <ActivityIcon activity={ACTIVITIES_BY_ID[lock!.id]} size={32} iconSize={17} />
+                <View style={{ flex: 1 }}>
+                  <Text style={hs.lockKicker}>{lang === 'tr' ? 'Şu anki anın' : 'Your current moment'}</Text>
+                  <Text style={hs.lockTitle} numberOfLines={1}>
+                    {activityName(lock!.id, lang)}
+                  </Text>
+                </View>
+                <View style={hs.lockTime}>
+                  <Ionicons name="time-outline" size={13} color={SOFT} />
+                  <Text style={hs.lockTimeText}>{lang === 'tr' ? `${lockLeft} dk` : `${lockLeft} min`}</Text>
+                </View>
+                <Pressable
+                  hitSlop={8}
+                  accessibilityLabel={lang === 'tr' ? 'Anını paylaş' : 'Share your moment'}
+                  style={hs.lockShare}
+                  onPress={() => {
+                    setPendingShare(true);
+                    reopenMoment(lock!);
+                  }}
+                >
+                  <Ionicons name="share-outline" size={17} color={ACTIVITIES_BY_ID[lock!.id].fg} />
+                </Pressable>
+              </PressableScale>
+            ) : null}
+
+            <Modal
+              visible={lockNotice && lockVisible}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setLockNotice(false)}
+              statusBarTranslucent
+            >
+              <Pressable style={hs.noticeBackdrop} onPress={() => setLockNotice(false)}>
+                <Pressable style={hs.noticeCard} onPress={() => {}}>
+                  {lockVisible ? (
+                    <>
+                      <ActivityIcon activity={ACTIVITIES_BY_ID[lock!.id]} size={44} iconSize={22} />
+                      <Text style={hs.noticeTitle}>{lang === 'tr' ? 'Yarım saatte bir an' : 'One moment every 30 min'}</Text>
+                      <Text style={hs.noticeText}>
+                        {lang === 'tr'
+                          ? `Şu an "${activityName(lock!.id, lang)}" anındasın. Yeni bir an seçmek için ${lockLeft} dk kaldı.`
+                          : `You're in your "${activityName(lock!.id, lang)}" moment. A new one opens in ${lockLeft} min.`}
+                      </Text>
+                      <View style={hs.noticeButtons}>
+                        <Pressable
+                          style={hs.noticeGhost}
+                          onPress={() => {
+                            tap(true);
+                            setLockNotice(false);
+                          }}
+                        >
+                          <Text style={hs.noticeGhostText}>{lang === 'tr' ? 'Tamam' : 'OK'}</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[hs.noticePrimary, { backgroundColor: ACTIVITIES_BY_ID[lock!.id].fg }]}
+                          onPress={() => {
+                            setLockNotice(false);
+                            reopenMoment(lock!);
+                          }}
+                        >
+                          <Text style={hs.noticePrimaryText}>{lang === 'tr' ? 'Anıma dön' : 'My moment'}</Text>
+                        </Pressable>
+                      </View>
+                    </>
+                  ) : null}
+                </Pressable>
+              </Pressable>
+            </Modal>
+
             {showDashboardEntry ? (
               <Pressable style={styles.dashEntry} onPress={openDashboard}>
                 <View style={styles.dashEntryDot} />
@@ -1935,7 +2698,7 @@ export default function HomeScreen() {
               </Pressable>
             ) : null}
 
-            <Text style={styles.sectionTitle}>{tx.sectionTop}</Text>
+            <Text style={[styles.sectionTitle, lockVisible && { marginTop: SP.md }]}>{tx.sectionTop}</Text>
             <View style={styles.topRow3}>
               {topThree.map((a, i) => (
                 <StaggerIn key={a.id} delay={i * 30} style={styles.topCardWrap}>
@@ -1944,7 +2707,7 @@ export default function HomeScreen() {
                     style={[styles.topCard, { backgroundColor: a.bg }]}
                     onPress={() => selectActivity(a)}
                   >
-                    <ActivityIcon activity={a} size={42} iconSize={23} bg="#ffffff" />
+                    <ActivityIcon activity={a} size={36} iconSize={20} bg="#ffffff" />
                     <Text style={styles.topCardName} numberOfLines={2}>
                       {activityName(a.id, lang)}
                     </Text>
@@ -1987,7 +2750,7 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.footerLinks}>
-              {consent || Object.values(profile).some(Boolean) ? (
+              {consent || history.length > 0 || Object.values(profile).some(Boolean) ? (
                 <Pressable onPress={resetAll}>
                   <Text style={styles.resetLink}>{tx.resetLink}</Text>
                 </Pressable>
@@ -2080,12 +2843,12 @@ const styles = StyleSheet.create({
   topRow3: { flexDirection: 'row', gap: SP.sm + 2 },
   topCardWrap: { flex: 1 },
   topCard: {
-    minHeight: 115,
-    borderRadius: SP.lg + 2,
-    paddingVertical: SP.md + 2,
+    minHeight: 92,
+    borderRadius: SP.lg,
+    paddingVertical: SP.md,
     paddingHorizontal: SP.sm,
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
   },
   topCardName: {
     fontFamily: F.bold,
@@ -2093,7 +2856,7 @@ const styles = StyleSheet.create({
     color: INK,
     textAlign: 'center',
     lineHeight: 17,
-    marginTop: SP.sm,
+    marginTop: SP.xs + 2,
   },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm + 2 },
   cardWrap: { width: '48.3%' },

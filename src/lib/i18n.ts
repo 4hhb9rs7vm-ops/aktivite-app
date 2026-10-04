@@ -203,7 +203,16 @@ export function dayPart(lang: Lang): { text: string; icon: DayPartIcon; color: s
 }
 
 // Sonuç kartındaki açıklama cümlesi
-export function ratioLine(filter: string, value: string | null | undefined, lang: Lang): string {
+// Ruh hali seçildiğinde "aynı şeyi yapan" yerine "aynı durumda olan" dili kullanılır
+export function ratioLine(filter: string, value: string | null | undefined, lang: Lang, mood = false): string {
+  const line = activityRatioLine(filter, value, lang);
+  if (!mood) return line;
+  return lang === 'tr'
+    ? line.replace('seninle aynı şeyi yapanların', 'seninle aynı durumda olanların')
+    : line.replace('doing the same as you', 'feeling the same as you');
+}
+
+function activityRatioLine(filter: string, value: string | null | undefined, lang: Lang): string {
   if (lang === 'tr') {
     switch (filter) {
       case 'country':
@@ -275,6 +284,7 @@ export const STRINGS = {
     noData: 'Henüz veri yok',
     firstTitle: 'İlk gelenlerdensin',
     firstNote: 'Birkaç kişi daha bu aktiviteyi seçtiğinde oran netleşecek ve burada otomatik olarak belirecek.',
+    firstNoteMood: 'Birkaç kişi daha bu ruh halini seçtiğinde oran netleşecek ve burada otomatik olarak belirecek.',
     errorBadge: 'Bağlantı yok',
     errorTitle: 'Bağlantı kurulamadı',
     errorNote: 'İnternet bağlantını kontrol edip tekrar dene.',
@@ -283,6 +293,8 @@ export const STRINGS = {
     sixtyMin: '60 dk',
     shareActivity: 'Aktiviteni arkadaşınla paylaş',
     changeActivity: 'Aktivitemi değiştir',
+    shareMood: 'Ruh halini arkadaşınla paylaş',
+    changeMood: 'Ruh halimi değiştir',
     shareMessage: (what: string, app: string, url: string) =>
       `Şu an ${what}. Sen ne yapıyorsun? Senin gibi kaç kişi var, ${app} uygulamasında bak: ${url}`,
     shareDialog: 'Sonucunu paylaş',
@@ -343,6 +355,7 @@ export const STRINGS = {
     noData: 'No data yet',
     firstTitle: "You're one of the first",
     firstNote: 'Once a few more people pick this activity, the percentage will appear here automatically.',
+    firstNoteMood: 'Once a few more people pick this mood, the percentage will appear here automatically.',
     errorBadge: 'Offline',
     errorTitle: "Couldn't connect",
     errorNote: 'Check your internet connection and try again.',
@@ -351,6 +364,8 @@ export const STRINGS = {
     sixtyMin: '60 min',
     shareActivity: 'Share your activity with a friend',
     changeActivity: 'Change my activity',
+    shareMood: 'Share your mood with a friend',
+    changeMood: 'Change my mood',
     shareMessage: (what: string, app: string, url: string) =>
       `Right now: ${what}. What are you doing? See how many people are just like you on ${app}: ${url}`,
     shareDialog: 'Share your result',

@@ -111,6 +111,7 @@ const PRIVACY_URLS: Record<Lang, string> = {
 };
 const DASHBOARD_THRESHOLD = 5000;
 const ACTIVE_COUNT_POLL_MS = 45 * 1000;
+const TOP_NOW_MIN = 20; // "Şu an dünyada en çok" satırı için gereken en az kişi
 const HERO_COUNT_THRESHOLD = 1000; // Bu sayının üstünde aktif kişi sayısı gösterilir
 const RATIO_POLL_MS = 40 * 1000; // Veri yokken oran bu aralıkla yeniden kontrol edilir
 const NOTIF_ASKED_KEY = 'notif_asked_v2';
@@ -121,7 +122,9 @@ const NOTIF_ASK_DELAY_MS = 2500;
 const FREE_MOMENTS_PER_HOUR = 1;
 const CHANGE_GRACE_MS = 2 * 60 * 1000;
 const LOCK_KEY = 'current_moment_v1';
-type MomentLock = { id: string; startedAt: number };
+// startedAt = yarım saatlik pencerenin başlangıcı; graceUsed = düzeltme hakkı bu pencerede kullanıldı
+type MomentLock = { id: string; startedAt: number; graceUsed?: boolean };
+const CARRY_KEY = 'moment_carry_v1'; // düzeltme sonrası pencerenin başlangıcı (yeni seçim gelene kadar)
 
 // An geçmişi: sadece telefonda tutulur, sunucuya gönderilmez
 const HISTORY_KEY = 'moment_history_v1';
@@ -1426,14 +1429,14 @@ const VERDICTS: Record<'hit' | 'highNear' | 'highFar' | 'lowNear' | 'lowFar', { 
     ],
   },
   lowNear: {
-    tr: ['Az kalsın! Sandığından biraz daha kalabalıksınız.', 'Yakındı, seninle aynı şeyi yapan biraz daha fazla kişi var.'],
+    tr: ['Az kalsın! Sandığından biraz daha kalabalıksınız.', 'Yakındı, seninle aynı durumda biraz daha fazla kişi var.'],
     en: ['So close! There are a few more of you than you think.', 'Close! A few more people are with you.'],
   },
   lowFar: {
     tr: [
       'Sürpriz! Sandığından çok daha kalabalıksınız.',
       'Yalnız değilsin, hem de hiç!',
-      'Kendini tek sanıyordun, ama dünya seninle aynı şeyi yapıyor.',
+      'Kendini tek sanıyordun, ama yalnız değilsin.',
     ],
     en: [
       'Surprise! There are way more of you than you think.',
@@ -1502,7 +1505,13 @@ function GuessScreen({
 
         <View style={gs.middle}>
           <Text style={gs.question}>
-            {tr ? 'Sence dünyada şu an kaç kişi seninle aynı şeyi yapıyor?' : 'How many people in the world are doing the same right now?'}
+            {activity.mood
+              ? tr
+                ? 'Sence dünyada şu an kaç kişi seninle aynı durumda?'
+                : 'How many people in the world feel the same as you right now?'
+              : tr
+                ? 'Sence dünyada şu an kaç kişi seninle aynı şeyi yapıyor?'
+                : 'How many people in the world are doing the same right now?'}
           </Text>
           <View style={[gs.kickerPill, { backgroundColor: '#ffffff' }]}>
             <Ionicons name="help-circle" size={18} color={fg} />
@@ -1624,8 +1633,9 @@ const gs = StyleSheet.create({
     alignItems: 'center',
     gap: SP.md,
     borderRadius: 18,
-    padding: SP.lg,
-    marginTop: SP.xl,
+    paddingVertical: SP.md,
+    paddingHorizontal: SP.lg,
+    marginTop: SP.lg,
   },
   compareIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   verdict: { fontFamily: F.bold, fontSize: FS.base, color: INK, lineHeight: 19 },
@@ -1634,6 +1644,9 @@ const gs = StyleSheet.create({
 
 const hs = StyleSheet.create({
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm, marginTop: SP.lg },
+  topNowRow: { flexDirection: 'row', alignItems: 'center', gap: SP.xs + 2, marginTop: SP.md },
+  topNowText: { flexShrink: 1, fontFamily: F.regular, fontSize: FS.sm, color: '#AFC0E8' },
+  topNowStrong: { fontFamily: F.bold, color: '#ffffff' },
   notifyRow: { flexDirection: 'row', alignItems: 'center', gap: SP.sm, marginTop: SP.sm },
   notifyText: { fontFamily: F.medium, fontSize: FS.sm, color: INK },
   notifySub: { fontFamily: F.regular, fontSize: FS.xs, color: SOFT, marginTop: 1 },
@@ -1745,6 +1758,8 @@ export default function HomeScreen() {
   const [guess, setGuess] = useState<number | null>(null);
   const [lock, setLock] = useState<MomentLock | null>(null);
   const [lockNotice, setLockNotice] = useState(false);
+  const [carry, setCarry] = useState<number | null>(null);
+  const [topNow, setTopNow] = useState<{ id: string; pct: number } | null>(null);
   const [pendingShare, setPendingShare] = useState(false);
   const [history, setHistory] = useState<MomentEntry[]>([]);
   const [endNotify, setEndNotify] = useState(false);
@@ -1759,16 +1774,19 @@ export default function HomeScreen() {
   useEffect(() => {
     ensureSession();
     (async () => {
-      const [p, c, l, lk, hs0, en] = await Promise.all([
+      const [p, c, l, lk, hs0, en, cr] = await Promise.all([
         AsyncStorage.getItem('profile'),
         AsyncStorage.getItem('consent'),
         loadLang(),
         AsyncStorage.getItem(LOCK_KEY),
         AsyncStorage.getItem(HISTORY_KEY),
         AsyncStorage.getItem(END_NOTIFY_KEY),
+        AsyncStorage.getItem(CARRY_KEY),
       ]);
       setLang(l);
       if (en === 'yes') setEndNotify(true);
+      if (cr && Date.now() - Number(cr) < SESSION_MS) setCarry(Number(cr));
+      else if (cr) AsyncStorage.removeItem(CARRY_KEY).catch(() => {});
       try {
         const h = hs0 ? JSON.parse(hs0) : [];
         if (Array.isArray(h)) setHistory(h);
@@ -1872,6 +1890,13 @@ export default function HomeScreen() {
     return () => clearInterval(id);
   }, [selected, ratio?.enough]);
 
+  // Ana ekrandaki "Şu anki anın" sayacı için dakikayı güncel tut
+  useEffect(() => {
+    if (selected || !lock) return;
+    const id = setInterval(() => setNow(Date.now()), 15 * 1000);
+    return () => clearInterval(id);
+  }, [selected, lock]);
+
   // Toplam aktif kullanıcı sayısını periyodik olarak kontrol ediyoruz; sadece ana ekrandayken.
   useEffect(() => {
     if (selected || dashboardOpen) return;
@@ -1881,12 +1906,19 @@ export default function HomeScreen() {
       fetchActiveCount().then((n) => {
         if (cancelled || n === null) return;
         setActiveCount(n);
-        if (n >= HERO_COUNT_THRESHOLD) {
+        if (n >= TOP_NOW_MIN) {
           fetchDashboard().then((rows) => {
-            if (!cancelled && rows) setLiveRows(rows);
+            if (cancelled || !rows) return;
+            setLiveRows(n >= HERO_COUNT_THRESHOLD ? rows : null);
+            // Şu an dünyada en çok yapılan aktivite (ruh halleri hariç, aktivite seçenler arasında)
+            const acts = rows.filter((r) => ACTIVITIES_BY_ID[r.activity] && !ACTIVITIES_BY_ID[r.activity].mood);
+            const total = acts.reduce((sum, r) => sum + r.cnt, 0);
+            const top = acts.reduce<DashboardRow | null>((m, r) => (!m || r.cnt > m.cnt ? r : m), null);
+            setTopNow(top && total >= TOP_NOW_MIN ? { id: top.activity, pct: Math.round((top.cnt / total) * 1000) / 10 } : null);
           });
         } else {
           setLiveRows(null);
+          setTopNow(null);
         }
       });
     };
@@ -1971,7 +2003,7 @@ export default function HomeScreen() {
   }
 
   function inGrace(l: MomentLock | null = lock) {
-    return !!l && Date.now() - l.startedAt < CHANGE_GRACE_MS;
+    return !!l && !l.graceUsed && Date.now() - l.startedAt < CHANGE_GRACE_MS;
   }
 
   // Kilitli anın sonucunu yeniden aç (yeni kayıt atmadan, tahmin adımı olmadan)
@@ -1990,6 +2022,10 @@ export default function HomeScreen() {
   }
 
   function selectActivity(a: Activity) {
+    const t = Date.now();
+    // Pencere: normalde yeni an şimdi başlar. Düzeltme hakkı kullanılıyorsa aynı pencere devam eder.
+    let windowStart = t;
+    let graceUsed = false;
     if (lockActive()) {
       if (lock!.id === a.id) {
         reopenMoment(lock!);
@@ -2000,21 +2036,34 @@ export default function HomeScreen() {
         setLockNotice(true);
         return;
       }
+      // İlk 2 dakika içinde farklı bir an: tek seferlik düzeltme, pencere sıfırlanmaz
+      windowStart = lock!.startedAt;
+      graceUsed = true;
+      const oldAt = lock!.startedAt;
+      updateHistory((h) => h.filter((e) => e.at !== oldAt));
+      cancelMomentEndNotification();
+    } else if (carry !== null && t - carry < SESSION_MS) {
+      // "Aktivitemi değiştir" ile düzeltme yapılmış: aynı pencere devam eder
+      windowStart = carry;
+      graceUsed = true;
+    }
+    if (carry !== null) {
+      setCarry(null);
+      AsyncStorage.removeItem(CARRY_KEY).catch(() => {});
     }
     tap();
-    const t = Date.now();
-    const next: MomentLock = { id: a.id, startedAt: t };
+    const next: MomentLock = { id: a.id, startedAt: windowStart, graceUsed };
     setLock(next);
     AsyncStorage.setItem(LOCK_KEY, JSON.stringify(next)).catch(() => {});
     const firstToday = !history.some((e) => dayKey(e.at) === dayKey(t));
-    updateHistory((h) => [...h, { id: a.id, at: t, guess: null, pct: null }]);
-    if (endNotify) scheduleMomentEndNotification(t + SESSION_MS, lang);
+    updateHistory((h) => [...h, { id: a.id, at: windowStart, guess: null, pct: null }]);
+    if (endNotify) scheduleMomentEndNotification(windowStart + SESSION_MS, lang);
     if (firstToday && computeStreak(history).count >= 1) {
       // Seri bir gün daha uzadı
       setTimeout(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}), 300);
     }
     setSelected(a);
-    setStartedAt(t);
+    setStartedAt(windowStart);
     setNow(t);
     setFilter('world');
     setEditing(false);
@@ -2065,6 +2114,9 @@ export default function HomeScreen() {
       const at = lock.startedAt;
       updateHistory((h) => h.filter((e) => e.at !== at));
       cancelMomentEndNotification();
+      // Düzeltme hakkı kullanıldı: yeni seçim aynı yarım saatlik pencereye yazılır
+      setCarry(at);
+      AsyncStorage.setItem(CARRY_KEY, String(at)).catch(() => {});
     }
     setNotifPrompt(false);
     setSelected(null);
@@ -2230,9 +2282,15 @@ export default function HomeScreen() {
     const value = needsProfile ? profile[filter as keyof Profile] : undefined;
     const picking = needsProfile && (!value || editing);
 
-    const isReal = !!ratio?.enough && typeof ratio.pct === 'number';
-    const pct = isReal ? (ratio!.pct as number) : null;
-    const shareLine = ratioLine(filter, value, lang);
+    // An boyunca sabit sonuç: bu an için dünya oranı bir kez alındıysa, o an bitene kadar aynı rakam gösterilir
+    const frozenPct =
+      filter === 'world' && lock
+        ? history.find((e) => e.at === lock.startedAt && e.id === selected.id)?.pct ?? null
+        : null;
+    const isReal = frozenPct !== null || (!!ratio?.enough && typeof ratio.pct === 'number');
+    const pct = frozenPct !== null ? frozenPct : isReal ? (ratio!.pct as number) : null;
+    const showCompare = guess !== null && filter === 'world';
+    const shareLine = ratioLine(filter, value, lang, !!selected.mood);
 
     const elapsed = startedAt ? now - startedAt : 0;
     const remainingMin = Math.max(0, Math.ceil((SESSION_MS - elapsed) / 60000));
@@ -2286,7 +2344,7 @@ export default function HomeScreen() {
           onPick={(v) => saveProfile({ ...profile, gender: v })}
         />
       );
-    } else if (loading) {
+    } else if (loading && frozenPct === null) {
       body = (
         <View style={styles.center}>
           <View style={styles.resultCard}>
@@ -2294,7 +2352,7 @@ export default function HomeScreen() {
           </View>
         </View>
       );
-    } else if (ratioError) {
+    } else if (ratioError && frozenPct === null) {
       body = (
         <View style={styles.center}>
           <View style={styles.resultCard}>
@@ -2322,7 +2380,7 @@ export default function HomeScreen() {
       resultShown = true;
       body = (
         <View style={styles.center}>
-          <View style={styles.resultCard}>
+          <View style={[styles.resultCard, showCompare && { paddingVertical: SP.xl }]}>
             <View style={[styles.cardBlob, { backgroundColor: bg }]} />
             <Sparkles key={filter + 'r'} color={fg} />
             <View style={[styles.badge, styles.badgeLive]}>
@@ -2331,7 +2389,7 @@ export default function HomeScreen() {
             </View>
             <CountUp value={pct} color={fg} lang={lang} />
             <Text style={styles.line}>{shareLine}</Text>
-            <View style={styles.peopleRow}>
+            <View style={[styles.peopleRow, showCompare && { display: 'none' }]}>
               <View style={styles.avatarStack}>
                 {[PALETTE.amber, PALETTE.indigo, PALETTE.teal].map((c, i) => (
                   <View
@@ -2344,7 +2402,7 @@ export default function HomeScreen() {
               </View>
               <Text style={styles.peopleText}>{tx.amongUsers}</Text>
             </View>
-            {guess !== null && filter === 'world' ? (
+            {showCompare ? (
               <GuessCompare key={selected.id + '-' + guess} guess={guess} pct={pct} fg={fg} bg={bg} lang={lang} />
             ) : null}
           </View>
@@ -2369,7 +2427,9 @@ export default function HomeScreen() {
                 ? lang === 'tr'
                   ? 'Bu saatte uyanık olanlar azınlıkta. Ortalık kalabalıklaştıkça oranın burada belirecek.'
                   : "Few people are awake right now. Your ratio will appear here as things get busier."
-                : tx.firstNote}
+                : selected.mood
+                  ? tx.firstNoteMood
+                  : tx.firstNote}
             </Text>
             {guess !== null && filter === 'world' ? (
               <Text style={[styles.note, { color: SOFT }]}>
@@ -2490,7 +2550,7 @@ export default function HomeScreen() {
             {resultShown || noData ? (
               <Pressable style={[styles.primaryAction, { backgroundColor: fg }]} onPress={openSharePreview}>
                 <Ionicons name="share-social-outline" size={18} color="#ffffff" />
-                <Text style={styles.primaryActionText}>{tx.shareActivity}</Text>
+                <Text style={styles.primaryActionText}>{selected.mood ? tx.shareMood : tx.shareActivity}</Text>
               </Pressable>
             ) : null}
             {inGrace() ? (
@@ -2501,7 +2561,7 @@ export default function HomeScreen() {
                   changeActivity();
                 }}
               >
-                <Text style={styles.buttonText}>{tx.changeActivity}</Text>
+                <Text style={styles.buttonText}>{selected.mood ? tx.changeMood : tx.changeActivity}</Text>
               </Pressable>
             ) : (
               <Pressable
@@ -2595,6 +2655,17 @@ export default function HomeScreen() {
                 {tx.heroAfter}
               </Text>
             )}
+            {topNow ? (
+              <View style={hs.topNowRow}>
+                <Ionicons name="globe-outline" size={15} color="#AFC0E8" />
+                <Text style={hs.topNowText} numberOfLines={1}>
+                  {lang === 'tr' ? 'Şu an dünyada en çok: ' : 'Most common right now: '}
+                  <Text style={hs.topNowStrong}>
+                    {activityName(topNow.id, lang)} · {formatPct(topNow.pct, lang)}
+                  </Text>
+                </Text>
+              </View>
+            ) : null}
             <View style={hs.chipRow}>
               <View style={[styles.momentChip, { marginTop: 0 }]}>
                 <Ionicons name="notifications-outline" size={15} color="#ffffff" />

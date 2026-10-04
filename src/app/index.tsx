@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  BackHandler,
   Easing,
   Linking,
   Modal,
@@ -94,6 +95,10 @@ import {
   requestNotificationPermission,
   scheduleDailyMoments,
 } from '@/lib/notifications';
+import { FRIENDS_TAB_ENABLED, loadMe, Me, ME_KEY, saveMe } from '@/lib/me';
+import { TAB_BAR_HEIGHT, TabBar, TabId } from '@/components/TabBar';
+import { MeTab } from '@/components/MeTab';
+import { FriendsTab } from '@/components/FriendsTab';
 
 // Seçim kilidi: kullanıcı yarım saatte bir yeni an seçebilir.
 // Not: kişinin istatistikte sayıldığı süre (şu an 60 dk) Supabase fonksiyonlarında ayarlanır, burada değil.
@@ -1643,7 +1648,7 @@ const gs = StyleSheet.create({
 });
 
 const hs = StyleSheet.create({
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm, marginTop: SP.lg },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm, marginTop: SP.md },
   topNowRow: { flexDirection: 'row', alignItems: 'center', gap: SP.xs + 2, marginTop: SP.md },
   topNowText: { flexShrink: 1, fontFamily: F.regular, fontSize: FS.sm, color: '#AFC0E8' },
   topNowStrong: { fontFamily: F.bold, color: '#ffffff' },
@@ -1763,6 +1768,9 @@ export default function HomeScreen() {
   const [pendingShare, setPendingShare] = useState(false);
   const [history, setHistory] = useState<MomentEntry[]>([]);
   const [endNotify, setEndNotify] = useState(false);
+  // 1.2: alt menü sekmesi ve "Ben" bilgileri (sadece telefonda)
+  const [tab, setTab] = useState<TabId>('now');
+  const [me, setMe] = useState<Me>({});
   const notifTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -1774,7 +1782,7 @@ export default function HomeScreen() {
   useEffect(() => {
     ensureSession();
     (async () => {
-      const [p, c, l, lk, hs0, en, cr] = await Promise.all([
+      const [p, c, l, lk, hs0, en, cr, m] = await Promise.all([
         AsyncStorage.getItem('profile'),
         AsyncStorage.getItem('consent'),
         loadLang(),
@@ -1782,8 +1790,10 @@ export default function HomeScreen() {
         AsyncStorage.getItem(HISTORY_KEY),
         AsyncStorage.getItem(END_NOTIFY_KEY),
         AsyncStorage.getItem(CARRY_KEY),
+        loadMe(),
       ]);
       setLang(l);
+      setMe(m);
       if (en === 'yes') setEndNotify(true);
       if (cr && Date.now() - Number(cr) < SESSION_MS) setCarry(Number(cr));
       else if (cr) AsyncStorage.removeItem(CARRY_KEY).catch(() => {});
@@ -1950,6 +1960,16 @@ export default function HomeScreen() {
     }, 350);
     return () => clearTimeout(t);
   }, [pendingShare, selected, ratio, ratioError, guessing]);
+
+  // Android geri tuşu: Arkadaşlar ya da Ben sekmesindeyken önce Şu An sekmesine dön
+  useEffect(() => {
+    if (tab === 'now' || selected || dashboardOpen) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setTab('now');
+      return true;
+    });
+    return () => sub.remove();
+  }, [tab, selected, dashboardOpen]);
 
   const sortedActivities = useMemo(() => {
     const main = rankMainActivities(new Date(now), liveRows);
@@ -2143,6 +2163,23 @@ export default function HomeScreen() {
     }
   }
 
+  // "Ben" sekmesinden yapılan değişiklikler
+  function updateMe(next: Me) {
+    setMe(next);
+    saveMe(next);
+  }
+
+  function updateProfileFromMe(next: Profile) {
+    setProfile(next);
+    AsyncStorage.setItem('profile', JSON.stringify(next)).catch(() => {});
+  }
+
+  function switchTab(next: TabId) {
+    if (next === tab) return;
+    tap(true);
+    setTab(next);
+  }
+
   function acceptConsent() {
     tap();
     setConsent(true);
@@ -2162,8 +2199,8 @@ export default function HomeScreen() {
     Alert.alert(
       tr ? 'Verilerini sil' : 'Delete your data',
       tr
-        ? 'Profil bilgilerin, an geçmişin ve serin kalıcı olarak silinecek. Bu işlem geri alınamaz.'
-        : 'Your profile, moment history and streak will be permanently deleted. This cannot be undone.',
+        ? 'Görünen adın, meslek ve üniversite seçimin, profil bilgilerin, an geçmişin ve serin kalıcı olarak silinecek. Bu işlem geri alınamaz.'
+        : 'Your display name, occupation and university, your profile, moment history and streak will be permanently deleted. This cannot be undone.',
       [
         { text: tx.cancel, style: 'cancel' },
         {
@@ -2171,9 +2208,10 @@ export default function HomeScreen() {
           style: 'destructive',
           onPress: async () => {
             // Not: 30 dakikalık seçim kilidi bilinçli olarak silinmez (kişisel veri değil, kural sayacı)
-            await AsyncStorage.multiRemove(['profile', 'consent', HISTORY_KEY]);
+            await AsyncStorage.multiRemove(['profile', 'consent', HISTORY_KEY, ME_KEY]);
             await clearPresence();
             setProfile({});
+            setMe({});
             setConsent(false);
             setHistory([]);
             setSelected(null);
@@ -2619,15 +2657,62 @@ export default function HomeScreen() {
   const lockVisible = !!lock && lockActive() && !!ACTIVITIES_BY_ID[lock.id];
   const lockLeft = lock ? Math.max(1, Math.ceil((SESSION_MS - (Date.now() - lock.startedAt)) / 60000)) : 0;
 
+  // ---- Alt menü ----
+  const tabBottomSpace = TAB_BAR_HEIGHT + insets.bottom + SP.xxl;
+  const tabBar = (
+    <TabBar
+      active={tab}
+      onChange={switchTab}
+      lang={lang}
+      showFriends={FRIENDS_TAB_ENABLED}
+      bottomInset={insets.bottom}
+    />
+  );
+
+  if (tab === 'me') {
+    const canReset =
+      consent || history.length > 0 || Object.values(profile).some(Boolean) || Object.values(me).some(Boolean);
+    return (
+      <View style={styles.homeRoot}>
+        <MeTab
+          lang={lang}
+          me={me}
+          onMeChange={updateMe}
+          profile={profile}
+          onProfileChange={updateProfileFromMe}
+          cities={CITIES}
+          ageRanges={AGE_RANGES}
+          streak={streak}
+          canReset={canReset}
+          onReset={resetAll}
+          onLangChange={changeLanguage}
+          privacyUrl={PRIVACY_URLS[lang]}
+          topInset={insets.top}
+          bottomSpace={tabBottomSpace}
+        />
+        {tabBar}
+      </View>
+    );
+  }
+
+  if (tab === 'friends' && FRIENDS_TAB_ENABLED) {
+    return (
+      <View style={styles.homeRoot}>
+        <FriendsTab lang={lang} topInset={insets.top} bottomSpace={tabBottomSpace} />
+        {tabBar}
+      </View>
+    );
+  }
+
   return (
     <View style={styles.homeRoot}>
       <StatusBar style="light" />
       <FadeIn style={{ flex: 1 }}>
         <ScrollView
-          contentContainerStyle={{ paddingBottom: insets.bottom + SP.xxl }}
+          contentContainerStyle={{ paddingBottom: tabBottomSpace }}
           showsVerticalScrollIndicator={false}
         >
-          <View style={[styles.hero, { paddingTop: insets.top + SP.lg }]}>
+          <View style={[styles.hero, { paddingTop: insets.top + SP.sm }]}>
             <HeroPeople />
             <View style={styles.heroLiveRow}>
               {showHeroCount ? (
@@ -2820,31 +2905,10 @@ export default function HomeScreen() {
               })}
             </View>
 
-            <View style={styles.footerLinks}>
-              {consent || history.length > 0 || Object.values(profile).some(Boolean) ? (
-                <Pressable onPress={resetAll}>
-                  <Text style={styles.resetLink}>{tx.resetLink}</Text>
-                </Pressable>
-              ) : null}
-              <Pressable onPress={() => Linking.openURL(PRIVACY_URLS[lang])}>
-                <Text style={styles.resetLink}>{tx.privacyLink}</Text>
-              </Pressable>
-              <View style={styles.langRow}>
-                {(['tr', 'en'] as Lang[]).map((l, i) => (
-                  <View key={l} style={styles.langItem}>
-                    {i > 0 ? <Text style={styles.langSep}>·</Text> : null}
-                    <Pressable onPress={() => changeLanguage(l)} hitSlop={8}>
-                      <Text style={[styles.langText, lang === l && styles.langTextActive]}>
-                        {l === 'tr' ? 'Türkçe' : 'English'}
-                      </Text>
-                    </Pressable>
-                  </View>
-                ))}
-              </View>
-            </View>
           </View>
         </ScrollView>
       </FadeIn>
+      {tabBar}
     </View>
   );
 }
@@ -2873,7 +2937,7 @@ const styles = StyleSheet.create({
   hero: {
     backgroundColor: LOGO_NAVY,
     paddingHorizontal: SP.xl,
-    paddingBottom: SP.xxl + SP.xs,
+    paddingBottom: SP.lg,
     borderBottomLeftRadius: 28,
     borderBottomRightRadius: 28,
     overflow: 'hidden',

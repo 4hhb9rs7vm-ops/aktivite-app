@@ -275,7 +275,7 @@ export const STRINGS = {
     consentP1:
       'Ülke, yaş aralığı, şehir ve cinsiyet bilgilerin, seçtiğin aktivite ile birlikte anonim olarak sunucuya gönderilir. Adın, e-postan ya da telefon numaran istenmez.',
     consentP2:
-      'Bilgilerin yalnızca oranları hesaplamak için kullanılır ve aktivitenin geçerli olduğu 60 dakika boyunca hesaba katılır. İstediğin zaman ana ekrandan silebilirsin.',
+      'Bilgilerin yalnızca oranları hesaplamak için kullanılır ve aktivitenin geçerli olduğu 60 dakika boyunca hesaba katılır. İstediğin zaman Ben sekmesinden silebilirsin.',
     readPrivacy: 'Gizlilik politikasını oku',
     accept: 'Kabul ediyorum',
     notNow: 'Şimdi değil',
@@ -346,7 +346,7 @@ export const STRINGS = {
     consentP1:
       'Your country, age range, city and gender are sent anonymously to our server together with the activity you picked. We never ask for your name, email or phone number.',
     consentP2:
-      'This info is only used to calculate the percentages, and only for the 60 minutes your activity is active. You can delete it anytime from the home screen.',
+      'This info is only used to calculate the percentages, and only for the 60 minutes your activity is active. You can delete it anytime from the Me tab.',
     readPrivacy: 'Read the privacy policy',
     accept: 'I agree',
     notNow: 'Not now',

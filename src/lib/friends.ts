@@ -5,6 +5,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ensureSession, supabase } from '@/lib/supabase';
 
 export const FRIEND_LIMIT = 50;
+
+// Kullanım şartları sayfası (gizlilik politikasıyla aynı yerde yayınlanıyor)
+export const TERMS_URLS = {
+  tr: 'https://4hhb9rs7vm-ops.github.io/aktivite-app/kullanim-sartlari/',
+  en: 'https://4hhb9rs7vm-ops.github.io/aktivite-app/terms/',
+} as const;
 export const PAIR_CODE_SECONDS = 120;
 const QR_PREFIX = 'suan:pair:';
 

@@ -33,6 +33,7 @@ import {
   occupationLabel,
   STUDENT,
 } from '@/lib/me';
+import { TERMS_URLS } from '@/lib/friends';
 import { searchUniversities, UNIVERSITY_OTHER } from '@/lib/universities';
 
 // ---- Renkler (tuvaldeki taslakla aynı) ----
@@ -98,6 +99,7 @@ const T = {
     settings: 'Ayarlar',
     language: 'Dil',
     privacy: 'Gizlilik politikası',
+    terms: 'Kullanım şartları',
     reset: 'Kayıtlı bilgilerimi sıfırla',
     resetTitle: 'Verilerini sil',
     resetText:
@@ -156,6 +158,7 @@ const T = {
     settings: 'Settings',
     language: 'Language',
     privacy: 'Privacy policy',
+    terms: 'Terms of use',
     reset: 'Reset my saved info',
     resetTitle: 'Delete your data',
     resetText:
@@ -489,6 +492,15 @@ export function MeTab({
               ))}
             </View>
           </View>
+          <Pressable
+            style={[styles.row, styles.rowLine]}
+            onPress={() => Linking.openURL(TERMS_URLS[lang]).catch(() => {})}
+            accessibilityRole="link"
+          >
+            <Ionicons name="document-text-outline" size={20} color={SOFT} />
+            <Text style={styles.rowLabel}>{t.terms}</Text>
+            <Ionicons name="open-outline" size={16} color={CHEVRON} />
+          </Pressable>
           <Pressable
             style={[styles.row, canReset && styles.rowLine]}
             onPress={() => Linking.openURL(privacyUrl).catch(() => {})}

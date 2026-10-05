@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
+  Linking,
   Modal,
   Pressable,
   RefreshControl,
@@ -30,6 +31,7 @@ import {
   ReportReason,
   saveMutes,
   setupFriends,
+  TERMS_URLS,
 } from '@/lib/friends';
 import { checkDisplayName, cleanDisplayName, Me, NAME_MAX, nameError, nameLength } from '@/lib/me';
 import { Avatar, QrSheet } from '@/components/QrSheet';
@@ -61,6 +63,7 @@ const T = {
     namePh: 'Örn. Ayşe ya da Kahve 🐱',
     step2: '2. Tek kuralımız',
     rule: 'Görünen adımda küfür, hakaret ya da başkasını taklit eden bir ad kullanmayacağım.',
+    readTerms: 'Kullanım şartlarını oku',
     start: 'Kabul et ve devam et',
     ruleMissing: 'Devam etmek için kuralı onayla.',
     emptyTitle: 'Henüz arkadaşın yok',
@@ -107,6 +110,7 @@ const T = {
     namePh: 'e.g. Alex or Coffee 🐱',
     step2: '2. Our one rule',
     rule: "I won't use swear words, insults or someone else's identity in my display name.",
+    readTerms: 'Read the terms of use',
     start: 'Agree and continue',
     ruleMissing: 'Accept the rule to continue.',
     emptyTitle: 'No friends yet',
@@ -539,6 +543,14 @@ function Onboarding({
             </View>
             <Text style={styles.ruleText}>{t.rule}</Text>
           </Pressable>
+          <Pressable
+            onPress={() => Linking.openURL(TERMS_URLS[lang]).catch(() => {})}
+            accessibilityRole="link"
+            hitSlop={8}
+            style={{ alignSelf: 'flex-start', marginLeft: 36 }}
+          >
+            <Text style={styles.link}>{t.readTerms}</Text>
+          </Pressable>
         </View>
 
         {error ? <Text style={styles.formError}>{error}</Text> : null}
@@ -752,6 +764,7 @@ const styles = StyleSheet.create({
   },
   checkboxOn: { backgroundColor: ACCENT, borderColor: ACCENT },
   ruleText: { flex: 1, fontFamily: F.regular, fontSize: 14, lineHeight: 20, color: INK },
+  link: { fontFamily: F.bold, fontSize: 13, color: ACCENT },
   formError: { fontFamily: F.medium, fontSize: 13, color: DANGER, marginLeft: 4 },
   primaryBtn: { backgroundColor: ACCENT, borderRadius: 16, minHeight: 52, alignItems: 'center', justifyContent: 'center' },
   primaryText: { fontFamily: F.bold, fontSize: 16, color: '#FFFFFF' },

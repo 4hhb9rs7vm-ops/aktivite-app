@@ -1,3 +1,5 @@
 {
-  "NSCameraUsageDescription": "Şu An, kamerayı yalnızca arkadaşının QR kodunu okutmak için kullanır. Hiçbir şey kaydedilmez."
+  "ios": {
+    "NSCameraUsageDescription": "Şu An, kamerayı yalnızca arkadaşının QR kodunu okutmak için kullanır. Hiçbir şey kaydedilmez."
+  }
 }

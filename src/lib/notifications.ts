@@ -1,5 +1,5 @@
-import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 
 import { loadLang, NOTIF_TEXT } from '@/lib/i18n';
 
@@ -14,15 +14,36 @@ const WINDOW_START_MIN = 11 * 60; // 11:00
 const WINDOW_END_MIN = 20 * 60; // 20:00
 export const ANSWER_WINDOW_MIN = 30; // Bildirimden sonra cevap penceresi (dakika)
 
-// Uygulama açıkken gelen bildirim de ekranda görünsün
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+// ---- Bildirim modülü (gerektiğinde yüklenir) ----
+// Android'de Expo Go, expo-notifications modülünü yüklerken hata veriyor (SDK 53'ten beri).
+// Bu yüzden modül sadece kullanılabildiği yerde yüklenir: iPhone'da Expo Go, her iki platformda
+// gerçek uygulama (mağaza ve geliştirme build'leri). Android + Expo Go'da bildirimler sessizce atlanır.
+type NotificationsModule = typeof import('expo-notifications');
+
+const IS_ANDROID_EXPO_GO = Platform.OS === 'android' && Constants.executionEnvironment === 'storeClient';
+export const NOTIFICATIONS_AVAILABLE = Platform.OS !== 'web' && !IS_ANDROID_EXPO_GO;
+
+let cached: NotificationsModule | null = null;
+export function getNotifications(): NotificationsModule | null {
+  if (!NOTIFICATIONS_AVAILABLE) return null;
+  if (!cached) {
+    try {
+      cached = require('expo-notifications') as NotificationsModule;
+      // Uygulama açıkken gelen bildirim de ekranda görünsün
+      cached.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowBanner: true,
+          shouldShowList: true,
+          shouldPlaySound: true,
+          shouldSetBadge: false,
+        }),
+      });
+    } catch {
+      cached = null;
+    }
+  }
+  return cached;
+}
 
 // ---- Tarih yardımcıları (yerel saat) ----
 function dateKey(d: Date): string {
@@ -70,7 +91,8 @@ export function getTodayMoment(): { start: Date; end: Date; isOpen: boolean } {
 }
 
 async function ensureChannel(): Promise<void> {
-  if (Platform.OS === 'android') {
+  const Notifications = getNotifications();
+  if (Notifications && Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
       name: 'Günün Anı / Today’s Moment',
       importance: Notifications.AndroidImportance.HIGH,
@@ -81,13 +103,15 @@ async function ensureChannel(): Promise<void> {
 
 // ---- İzinler ----
 export async function hasNotificationPermission(): Promise<boolean> {
-  if (Platform.OS === 'web') return false;
+  const Notifications = getNotifications();
+  if (!Notifications) return false;
   const { status } = await Notifications.getPermissionsAsync();
   return status === 'granted';
 }
 
 export async function requestNotificationPermission(): Promise<boolean> {
-  if (Platform.OS === 'web') return false;
+  const Notifications = getNotifications();
+  if (!Notifications) return false;
   // Android 13+: izin penceresinin çıkması için kanal önceden oluşturulmalı
   await ensureChannel();
   const current = await Notifications.getPermissionsAsync();
@@ -99,7 +123,8 @@ export async function requestNotificationPermission(): Promise<boolean> {
 
 // ---- Planlama ----
 export async function cancelDailyMoments(): Promise<void> {
-  if (Platform.OS === 'web') return;
+  const Notifications = getNotifications();
+  if (!Notifications) return;
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   await Promise.all(
     scheduled
@@ -110,6 +135,8 @@ export async function cancelDailyMoments(): Promise<void> {
 
 // Dil değiştiğinde de çağrılır; bildirim metni seçili dilde planlanır
 export async function scheduleDailyMoments(): Promise<void> {
+  const Notifications = getNotifications();
+  if (!Notifications) return;
   if (!(await hasNotificationPermission())) return;
   await ensureChannel();
   await cancelDailyMoments();

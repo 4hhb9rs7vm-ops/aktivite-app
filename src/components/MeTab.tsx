@@ -99,6 +99,17 @@ const T = {
     language: 'Dil',
     privacy: 'Gizlilik politikası',
     reset: 'Kayıtlı bilgilerimi sıfırla',
+    resetTitle: 'Verilerini sil',
+    resetText:
+      'Görünen adın, meslek ve üniversite seçimin, profil bilgilerin, an geçmişin ve serin kalıcı olarak silinecek. Bu işlem geri alınamaz.',
+    resetTitleFriends: 'Arkadaş listen ne olsun?',
+    resetTextFriends:
+      'Meslek, üniversite, yaş, şehir, an geçmişin ve serin silinecek. Arkadaşların için ayrıca seçim yap.',
+    keepFriends: 'Arkadaşlarım kalsın',
+    keepFriendsSub: 'Görünen adın da korunur, arkadaşların seni görmeye devam eder.',
+    dropFriends: 'Arkadaşlarımı da sil',
+    dropFriendsSub: 'Herkesin listesinden de çıkarsın. Geri almak için yeniden QR okutmak gerekir.',
+    delete: 'Sil',
   },
   en: {
     title: 'Me',
@@ -146,6 +157,17 @@ const T = {
     language: 'Language',
     privacy: 'Privacy policy',
     reset: 'Reset my saved info',
+    resetTitle: 'Delete your data',
+    resetText:
+      'Your display name, occupation and university, your profile, moment history and streak will be permanently deleted. This cannot be undone.',
+    resetTitleFriends: 'What about your friends?',
+    resetTextFriends:
+      'Your occupation, university, age, city, moment history and streak will be deleted. Choose separately for your friends.',
+    keepFriends: 'Keep my friends',
+    keepFriendsSub: 'Your display name is kept too, and your friends can still see you.',
+    dropFriends: 'Delete my friends too',
+    dropFriendsSub: "You'll be removed from everyone's list. To undo, you'd need to scan QR codes again.",
+    delete: 'Delete',
   },
 };
 
@@ -164,6 +186,7 @@ export function MeTab({
   ageRanges,
   streak,
   canReset,
+  friendsSetup,
   onReset,
   onLangChange,
   privacyUrl,
@@ -179,7 +202,8 @@ export function MeTab({
   ageRanges: string[];
   streak: { count: number; doneToday: boolean };
   canReset: boolean;
-  onReset: () => void;
+  friendsSetup: boolean;
+  onReset: (deleteFriends: boolean) => void;
   onLangChange: (l: Lang) => void;
   privacyUrl: string;
   topInset: number;
@@ -188,6 +212,7 @@ export function MeTab({
   const t = T[lang];
   const [picker, setPicker] = useState<PickerId | null>(null);
   const [nameOpen, setNameOpen] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
 
   const isStudent = me.occupation === STUDENT;
   const showCity = profile.country === COUNTRY_TR;
@@ -474,7 +499,14 @@ export function MeTab({
             <Ionicons name="open-outline" size={16} color={CHEVRON} />
           </Pressable>
           {canReset ? (
-            <Pressable style={styles.row} onPress={onReset} accessibilityRole="button">
+            <Pressable
+              style={styles.row}
+              onPress={() => {
+                tap();
+                setResetOpen(true);
+              }}
+              accessibilityRole="button"
+            >
               <Ionicons name="trash-outline" size={20} color={DANGER} />
               <Text style={[styles.rowLabel, { color: DANGER }]}>{t.reset}</Text>
             </Pressable>
@@ -508,6 +540,17 @@ export function MeTab({
         emptyText={picker === 'university' ? t.noResult : undefined}
         onClose={() => setPicker(null)}
         key={picker ?? 'none'}
+      />
+
+      <ResetDialog
+        visible={resetOpen}
+        lang={lang}
+        friendsSetup={friendsSetup}
+        onCancel={() => setResetOpen(false)}
+        onConfirm={(deleteFriends) => {
+          setResetOpen(false);
+          onReset(deleteFriends);
+        }}
       />
 
       <NameEditor
@@ -609,6 +652,78 @@ function PickerSheet({
           />
         </View>
       </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+// ---- Sıfırlama onayı (arkadaşı olanlara ayrı seçim) ----
+function ResetDialog({
+  visible,
+  lang,
+  friendsSetup,
+  onCancel,
+  onConfirm,
+}: {
+  visible: boolean;
+  lang: Lang;
+  friendsSetup: boolean;
+  onCancel: () => void;
+  onConfirm: (deleteFriends: boolean) => void;
+}) {
+  const t = T[lang];
+  const [drop, setDrop] = useState(false);
+
+  const choice = (on: boolean, title: string, sub: string, onPress: () => void) => (
+    <Pressable
+      style={[styles.choice, on && styles.choiceOn]}
+      onPress={() => {
+        tap(true);
+        onPress();
+      }}
+      accessibilityRole="radio"
+      accessibilityState={{ selected: on }}
+    >
+      <View style={[styles.radio, on && styles.radioOn]}>{on ? <View style={styles.radioDot} /> : null}</View>
+      <View style={{ flex: 1, gap: 3 }}>
+        <Text style={styles.choiceTitle}>{title}</Text>
+        <Text style={styles.toggleSub}>{sub}</Text>
+      </View>
+    </Pressable>
+  );
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onCancel}
+      statusBarTranslucent
+      onShow={() => setDrop(false)}
+    >
+      <View style={styles.dialogWrap}>
+        <Pressable style={styles.backdrop} onPress={onCancel} />
+        <View style={styles.dialog}>
+          <View style={styles.trashIcon}>
+            <Ionicons name="trash-outline" size={22} color={DANGER} />
+          </View>
+          <Text style={styles.sheetTitle}>{friendsSetup ? t.resetTitleFriends : t.resetTitle}</Text>
+          <Text style={styles.dialogSub}>{friendsSetup ? t.resetTextFriends : t.resetText}</Text>
+          {friendsSetup ? (
+            <View style={{ gap: 10, marginTop: 4 }}>
+              {choice(!drop, t.keepFriends, t.keepFriendsSub, () => setDrop(false))}
+              {choice(drop, t.dropFriends, t.dropFriendsSub, () => setDrop(true))}
+            </View>
+          ) : null}
+          <View style={styles.dialogButtons}>
+            <Pressable style={styles.ghostBtn} onPress={onCancel}>
+              <Text style={styles.ghostText}>{t.cancel}</Text>
+            </Pressable>
+            <Pressable style={[styles.primaryBtn, { backgroundColor: '#B3261E' }]} onPress={() => onConfirm(drop)}>
+              <Text style={styles.primaryText}>{t.delete}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -861,4 +976,28 @@ const styles = StyleSheet.create({
   ghostText: { fontFamily: F.bold, fontSize: 15, color: INK },
   primaryBtn: { flex: 1, paddingVertical: 14, borderRadius: 14, backgroundColor: ACCENT, alignItems: 'center' },
   primaryText: { fontFamily: F.bold, fontSize: 15, color: '#FFFFFF' },
+  trashIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FDECEA', alignItems: 'center', justifyContent: 'center' },
+  choice: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'flex-start',
+    borderWidth: 1.5,
+    borderColor: '#E1E3E9',
+    borderRadius: 16,
+    padding: 14,
+  },
+  choiceOn: { borderColor: ACCENT },
+  choiceTitle: { fontFamily: F.bold, fontSize: 15, color: INK },
+  radio: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#B9BCC6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  radioOn: { borderColor: ACCENT },
+  radioDot: { width: 11, height: 11, borderRadius: 6, backgroundColor: ACCENT },
 });

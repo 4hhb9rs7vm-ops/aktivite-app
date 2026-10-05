@@ -57,7 +57,6 @@ import {
   Wallet,
 } from 'phosphor-react-native';
 import * as Haptics from 'expo-haptics';
-import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Localization from 'expo-localization';
 import { captureRef } from 'react-native-view-shot';
@@ -68,7 +67,7 @@ import {
   DMSans_700Bold,
   useFonts,
 } from '@expo-google-fonts/dm-sans';
-import { supabase } from '@/lib/supabase';
+import { ensureSession, supabase } from '@/lib/supabase';
 import {
   activityName,
   COUNTRY_TR,
@@ -90,6 +89,7 @@ import {
 } from '@/lib/i18n';
 import { buildStory, Story } from '@/lib/shareCard';
 import {
+  getNotifications,
   getTodayMoment,
   hasNotificationPermission,
   requestNotificationPermission,
@@ -98,7 +98,15 @@ import {
 import { FRIENDS_TAB_ENABLED, loadMe, Me, ME_KEY, saveMe } from '@/lib/me';
 import { TAB_BAR_HEIGHT, TabBar, TabId } from '@/components/TabBar';
 import { MeTab } from '@/components/MeTab';
-import { FriendsTab } from '@/components/FriendsTab';
+import { ActivityInfo, FriendsTab } from '@/components/FriendsTab';
+import {
+  deleteFriendData,
+  FRIEND_MUTES_KEY,
+  FRIENDS_SETUP_KEY,
+  isFriendsSetup,
+  updateFriendName,
+  updateMoodShare,
+} from '@/lib/friends';
 
 // Seçim kilidi: kullanıcı yarım saatte bir yeni an seçebilir.
 // Not: kişinin istatistikte sayıldığı süre (şu an 60 dk) Supabase fonksiyonlarında ayarlanır, burada değil.
@@ -140,6 +148,8 @@ const END_NOTIF_COUNT_KEY = 'moment_end_notif_count_v1';
 
 async function cancelMomentEndNotification() {
   try {
+    const Notifications = getNotifications();
+    if (!Notifications) return;
     const id = await AsyncStorage.getItem(END_NOTIF_ID_KEY);
     if (!id) return;
     // Henüz gönderilmemiş bir bildirim iptal ediliyorsa günlük hakkı geri ver
@@ -177,6 +187,8 @@ async function scheduleMomentEndNotification(endsAt: number, lang: Lang) {
   } catch {}
   if (used >= END_NOTIF_DAILY_MAX) return;
   try {
+    const Notifications = getNotifications();
+    if (!Notifications) return;
     const tr = lang === 'tr';
     const id = await Notifications.scheduleNotificationAsync({
       content: {
@@ -340,21 +352,6 @@ const FILTER_ICONS: Record<FilterId, ComponentType<{ size?: number; color?: stri
 type Ratio = { enough: boolean; pct?: number } | null;
 type DashboardRow = { activity: string; cnt: number };
 
-let sessionPromise: Promise<boolean> | null = null;
-function ensureSession() {
-  if (!sessionPromise) {
-    sessionPromise = (async () => {
-      const { data } = await supabase.auth.getSession();
-      if (data.session) return true;
-      const { error } = await supabase.auth.signInAnonymously();
-      return !error;
-    })().then((ok) => {
-      if (!ok) sessionPromise = null;
-      return ok;
-    });
-  }
-  return sessionPromise;
-}
 
 async function pushPresence(activityId: string, profile: Profile, consent: boolean) {
   if (!(await ensureSession())) return false;
@@ -1771,6 +1768,7 @@ export default function HomeScreen() {
   // 1.2: alt menü sekmesi ve "Ben" bilgileri (sadece telefonda)
   const [tab, setTab] = useState<TabId>('now');
   const [me, setMe] = useState<Me>({});
+  const [friendsSetup, setFriendsSetup] = useState(false);
   const notifTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -1960,6 +1958,11 @@ export default function HomeScreen() {
     }, 350);
     return () => clearTimeout(t);
   }, [pendingShare, selected, ratio, ratioError, guessing]);
+
+  // Arkadaşlar özelliği kurulmuş mu? (sekme değiştikçe tazelenir)
+  useEffect(() => {
+    isFriendsSetup().then(setFriendsSetup).catch(() => {});
+  }, [tab]);
 
   // Android geri tuşu: Arkadaşlar ya da Ben sekmesindeyken önce Şu An sekmesine dön
   useEffect(() => {
@@ -2165,8 +2168,25 @@ export default function HomeScreen() {
 
   // "Ben" sekmesinden yapılan değişiklikler
   function updateMe(next: Me) {
+    const prev = me;
     setMe(next);
     saveMe(next);
+    // Arkadaşlar açıksa görünen ad ve ruh hali tercihi sunucuda da güncellenir
+    if (friendsSetup) {
+      if (next.displayName && next.displayName !== prev.displayName) {
+        updateFriendName(next.displayName).catch(() => {});
+      }
+      if (!!next.moodShare !== !!prev.moodShare) {
+        updateMoodShare(!!next.moodShare).catch(() => {});
+      }
+    }
+  }
+
+  // Arkadaş listesinde ikon ve ad göstermek için
+  function activityInfo(id: string): ActivityInfo | null {
+    const a = ACTIVITIES_BY_ID[id];
+    if (!a) return null;
+    return { name: activityName(a.id, lang), Icon: a.icon, fg: a.fg, bg: a.bg };
   }
 
   function updateProfileFromMe(next: Profile) {
@@ -2194,35 +2214,40 @@ export default function HomeScreen() {
     setEditing(false);
   }
 
-  function resetAll() {
-    const tr = lang === 'tr';
-    Alert.alert(
-      tr ? 'Verilerini sil' : 'Delete your data',
-      tr
-        ? 'Görünen adın, meslek ve üniversite seçimin, profil bilgilerin, an geçmişin ve serin kalıcı olarak silinecek. Bu işlem geri alınamaz.'
-        : 'Your display name, occupation and university, your profile, moment history and streak will be permanently deleted. This cannot be undone.',
-      [
-        { text: tx.cancel, style: 'cancel' },
-        {
-          text: tx.delete,
-          style: 'destructive',
-          onPress: async () => {
-            // Not: 30 dakikalık seçim kilidi bilinçli olarak silinmez (kişisel veri değil, kural sayacı)
-            await AsyncStorage.multiRemove(['profile', 'consent', HISTORY_KEY, ME_KEY]);
-            await clearPresence();
-            setProfile({});
-            setMe({});
-            setConsent(false);
-            setHistory([]);
-            setSelected(null);
-            setStartedAt(null);
-            setEditing(false);
-            setFilter('world');
-            setRatio(null);
-          },
-        },
-      ]
-    );
+  // "Kayıtlı bilgilerimi sıfırla" (onay Ben sekmesindeki pencerede alınır)
+  async function resetAll(deleteFriends: boolean) {
+    // Not: 30 dakikalık seçim kilidi bilinçli olarak silinmez (kişisel veri değil, kural sayacı)
+    const keepFriends = friendsSetup && !deleteFriends;
+    await AsyncStorage.multiRemove(['profile', 'consent', HISTORY_KEY, ME_KEY]);
+    if (friendsSetup && deleteFriends) {
+      try {
+        await deleteFriendData();
+      } catch {
+        Alert.alert(
+          lang === 'tr' ? 'Arkadaşların silinemedi' : "Couldn't delete your friends",
+          lang === 'tr'
+            ? 'Bağlantı kurulamadı. Diğer bilgilerin silindi; arkadaşlarını silmek için internete bağlıyken tekrar dene.'
+            : "Couldn't connect. Your other info was deleted; try again online to delete your friends.",
+          [{ text: tx.ok }]
+        );
+      }
+    } else if (!friendsSetup) {
+      await AsyncStorage.multiRemove([FRIENDS_SETUP_KEY, FRIEND_MUTES_KEY]);
+    }
+    await clearPresence();
+    // Arkadaşlar kalıyorsa görünen ad ve ruh hali tercihi de kalır
+    const kept: Me = keepFriends ? { displayName: me.displayName, moodShare: me.moodShare } : {};
+    if (keepFriends) saveMe(kept);
+    setMe(kept);
+    setFriendsSetup(await isFriendsSetup());
+    setProfile({});
+    setConsent(false);
+    setHistory([]);
+    setSelected(null);
+    setStartedAt(null);
+    setEditing(false);
+    setFilter('world');
+    setRatio(null);
   }
 
   // Paylaş butonu: önce önizleme panelini aç
@@ -2684,6 +2709,7 @@ export default function HomeScreen() {
           ageRanges={AGE_RANGES}
           streak={streak}
           canReset={canReset}
+          friendsSetup={friendsSetup}
           onReset={resetAll}
           onLangChange={changeLanguage}
           privacyUrl={PRIVACY_URLS[lang]}
@@ -2698,7 +2724,16 @@ export default function HomeScreen() {
   if (tab === 'friends' && FRIENDS_TAB_ENABLED) {
     return (
       <View style={styles.homeRoot}>
-        <FriendsTab lang={lang} topInset={insets.top} bottomSpace={tabBottomSpace} />
+        <FriendsTab
+          lang={lang}
+          topInset={insets.top}
+          bottomSpace={tabBottomSpace}
+          bottomInset={insets.bottom}
+          me={me}
+          onMeChange={updateMe}
+          myActivityId={lock && Date.now() - lock.startedAt < SESSION_MS ? lock.id : null}
+          activityInfo={activityInfo}
+        />
         {tabBar}
       </View>
     );

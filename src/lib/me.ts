@@ -8,7 +8,7 @@ export const ME_KEY = 'me_v1';
 
 // Arkadaşlar sekmesi geliştirme anahtarının arkasında: Expo Go'da (geliştirme) açık,
 // mağaza build'inde kapalı. Apple 1.2 uyum listesi tamamlanmadan true yapılmayacak.
-export const FRIENDS_TAB_ENABLED = __DEV__;
+export const FRIENDS_TAB_ENABLED = true;
 
 export type Me = {
   displayName?: string;

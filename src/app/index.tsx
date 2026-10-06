@@ -11,6 +11,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleProp,
   StyleSheet,
   Switch,
@@ -43,6 +44,7 @@ import {
   GameController,
   GenderIntersex,
   GlobeHemisphereEast,
+  GraduationCap,
   HeartBreak,
   Hourglass,
   Leaf,
@@ -54,6 +56,7 @@ import {
   Television,
   Thermometer,
   UsersThree,
+  LockSimple,
   Wallet,
 } from 'phosphor-react-native';
 import * as Haptics from 'expo-haptics';
@@ -95,7 +98,8 @@ import {
   requestNotificationPermission,
   scheduleDailyMoments,
 } from '@/lib/notifications';
-import { FRIENDS_TAB_ENABLED, loadMe, Me, ME_KEY, saveMe } from '@/lib/me';
+import { FRIENDS_TAB_ENABLED, loadMe, Me, ME_KEY, saveMe, STUDENT } from '@/lib/me';
+import { UNIVERSITY_OTHER } from '@/lib/universities';
 import { TAB_BAR_HEIGHT, TabBar, TabId } from '@/components/TabBar';
 import { MeTab } from '@/components/MeTab';
 import { ActivityInfo, FriendsTab } from '@/components/FriendsTab';
@@ -118,6 +122,10 @@ function isNight(d = new Date()) {
 }
 const INSTA_HANDLE = '@suan.app';
 const SPLASH_MS = 3500;
+// Davet bağlantısı: telefonu tanıyıp App Store'a ya da Google Play'e yönlendiren sayfa
+const INVITE_URL = 'https://4hhb9rs7vm-ops.github.io/aktivite-app/indir/';
+const FRIENDS_TIP_KEY = 'friends_tip_seen_v1';
+
 const PRIVACY_URLS: Record<Lang, string> = {
   tr: 'https://4hhb9rs7vm-ops.github.io/aktivite-app/gizlilik/',
   en: 'https://4hhb9rs7vm-ops.github.io/aktivite-app/privacy/',
@@ -317,6 +325,7 @@ const ACTIVITIES_BY_ID: Record<string, Activity> = Object.fromEntries(ACTIVITIES
 
 const FILTERS = [
   { id: 'world', label: 'Dünya' },
+  { id: 'campus', label: 'Kampüs' },
   { id: 'country', label: 'Ülke' },
   { id: 'city', label: 'Şehir' },
   { id: 'age', label: 'Yaş' },
@@ -339,7 +348,8 @@ const CITIES = [
 ];
 
 type FilterId = (typeof FILTERS)[number]['id'];
-type Profile = { country?: string; age?: string; city?: string; gender?: string };
+// campus: öğrencinin Ben sekmesinde seçtiği üniversite. Profilde saklanmaz, her seferinde "Ben" bilgisinden türetilir.
+type Profile = { country?: string; age?: string; city?: string; gender?: string; campus?: string };
 
 // Filtre simgeleri (karşılaştırma satırı)
 const FILTER_ICONS: Record<FilterId, ComponentType<{ size?: number; color?: string; weight?: any }>> = {
@@ -348,6 +358,7 @@ const FILTER_ICONS: Record<FilterId, ComponentType<{ size?: number; color?: stri
   city: MapPin,
   age: Cake,
   gender: GenderIntersex,
+  campus: GraduationCap,
 };
 type Ratio = { enough: boolean; pct?: number } | null;
 type DashboardRow = { activity: string; cnt: number };
@@ -362,6 +373,7 @@ async function pushPresence(activityId: string, profile: Profile, consent: boole
     p_age: p.age ?? null,
     p_city: p.city ?? null,
     p_gender: p.gender ?? null,
+    p_university: p.campus ?? null,
   });
   return !error;
 }
@@ -1091,8 +1103,8 @@ function FilterSegment({
   const title = lang === 'tr' ? 'Kimlerle karşılaştıralım?' : 'Compare with…';
   const labels: Record<FilterId, string> =
     lang === 'tr'
-      ? { world: 'Dünya', country: 'Ülke', city: 'Şehir', age: 'Yaş', gender: 'Cinsiyet' }
-      : { world: 'World', country: 'Country', city: 'City', age: 'Age', gender: 'Gender' };
+      ? { world: 'Dünya', country: 'Ülke', city: 'Şehir', age: 'Yaş', gender: 'Cinsiyet', campus: 'Kampüs' }
+      : { world: 'World', country: 'Country', city: 'City', age: 'Age', gender: 'Gender', campus: 'Campus' };
 
   return (
     <View>
@@ -1769,6 +1781,12 @@ export default function HomeScreen() {
   const [tab, setTab] = useState<TabId>('now');
   const [me, setMe] = useState<Me>({});
   const [friendsSetup, setFriendsSetup] = useState(false);
+  // Arkadaşlar sekmesi için tek seferlik ipucu balonu
+  const [friendsTip, setFriendsTip] = useState(false);
+  // Kampüs karşılaştırması: sadece öğrenci olup listeden üniversite seçenler için
+  const campus =
+    me.occupation === STUDENT && me.university && me.university !== UNIVERSITY_OTHER ? me.university : undefined;
+  const fullProfile: Profile = campus ? { ...profile, campus } : profile;
   const notifTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -1841,7 +1859,7 @@ export default function HomeScreen() {
 
   useEffect(() => {
     if (!selected) return;
-    const value = filter === 'world' ? null : profile[filter as keyof Profile] ?? null;
+    const value = filter === 'world' ? null : fullProfile[filter as keyof Profile] ?? null;
     if (filter !== 'world' && (!consent || !value)) {
       setRatio(null);
       setRatioError(false);
@@ -1864,7 +1882,7 @@ export default function HomeScreen() {
         setLoading(false);
       }
     });
-  }, [selected, filter, profile, consent, refreshKey]);
+  }, [selected, filter, profile, campus, consent, refreshKey]);
 
   // İlk kez bir sonuç görüldüğünde filtrelere dikkat çek (cihaz başına bir kez)
   useEffect(() => {
@@ -1958,6 +1976,29 @@ export default function HomeScreen() {
     }, 350);
     return () => clearTimeout(t);
   }, [pendingShare, selected, ratio, ratioError, guessing]);
+
+  useEffect(() => {
+    if (!FRIENDS_TAB_ENABLED) return;
+    AsyncStorage.getItem(FRIENDS_TIP_KEY)
+      .then((v) => setFriendsTip(v !== '1'))
+      .catch(() => {});
+  }, []);
+
+  function dismissFriendsTip() {
+    setFriendsTip(false);
+    AsyncStorage.setItem(FRIENDS_TIP_KEY, '1').catch(() => {});
+  }
+
+  // Kampüs daveti: standart metin + indirme bağlantısı, telefonun paylaşım menüsüyle
+  function inviteCampus() {
+    if (!campus) return;
+    tap();
+    const message =
+      lang === 'tr'
+        ? `${campus} öğrencileri şu an ne yapıyor görmek istiyorum ama yeterli kişi yok 😅 Şu An'ı indir, kampüsümüzün oranı açılsın: ${INVITE_URL}`
+        : `I want to see what ${campus} students are doing right now, but not enough of us are on Şu An yet 😅 Download it so our campus unlocks: ${INVITE_URL}`;
+    Share.share({ message }).catch(() => {});
+  }
 
   // Arkadaşlar özelliği kurulmuş mu? (sekme değiştikçe tazelenir)
   useEffect(() => {
@@ -2093,7 +2134,7 @@ export default function HomeScreen() {
     setRatio(null);
     setGuess(null);
     setGuessing(true);
-    pushPresence(a.id, profile, consent).then(() => setRefreshKey((k) => k + 1));
+    pushPresence(a.id, fullProfile, consent).then(() => setRefreshKey((k) => k + 1));
     shouldAskNotifications().then((ask) => {
       if (!ask) return;
       if (notifTimer.current) clearTimeout(notifTimer.current);
@@ -2162,7 +2203,7 @@ export default function HomeScreen() {
       const t = Date.now();
       setStartedAt(t);
       setNow(t);
-      pushPresence(selected.id, next, consent).then(() => setRefreshKey((k) => k + 1));
+      pushPresence(selected.id, campus ? { ...next, campus } : next, consent).then(() => setRefreshKey((k) => k + 1));
     }
   }
 
@@ -2195,6 +2236,7 @@ export default function HomeScreen() {
   }
 
   function switchTab(next: TabId) {
+    if (next === 'friends' && friendsTip) dismissFriendsTip();
     if (next === tab) return;
     tap(true);
     setTab(next);
@@ -2204,7 +2246,7 @@ export default function HomeScreen() {
     tap();
     setConsent(true);
     AsyncStorage.setItem('consent', 'yes');
-    if (selected) pushPresence(selected.id, profile, true).then(() => setRefreshKey((k) => k + 1));
+    if (selected) pushPresence(selected.id, fullProfile, true).then(() => setRefreshKey((k) => k + 1));
   }
 
   function chooseFilter(id: FilterId) {
@@ -2340,9 +2382,11 @@ export default function HomeScreen() {
 
   if (selected) {
     const { bg, fg } = selected;
-    const visibleFilters = FILTERS.filter((f) => f.id !== 'city' || profile.country === COUNTRY_TR);
+    const visibleFilters = FILTERS.filter(
+      (f) => (f.id !== 'city' || profile.country === COUNTRY_TR) && (f.id !== 'campus' || !!campus)
+    );
     const needsProfile = filter !== 'world';
-    const value = needsProfile ? profile[filter as keyof Profile] : undefined;
+    const value = needsProfile ? fullProfile[filter as keyof Profile] : undefined;
     const picking = needsProfile && (!value || editing);
 
     // An boyunca sabit sonuç: bu an için dünya oranı bir kez alındıysa, o an bitene kadar aynı rakam gösterilir
@@ -2471,6 +2515,34 @@ export default function HomeScreen() {
           </View>
         </View>
       );
+    } else if (filter === 'campus') {
+      // Kampüste yeterli kişi yok: mesaj + davet
+      noData = true;
+      body = (
+        <View style={styles.center}>
+          <View style={styles.resultCard}>
+            <View style={[styles.badge, styles.badgeEst]}>
+              <Text style={[styles.badgeText, styles.badgeTextEst]} numberOfLines={1}>
+                {campus}
+              </Text>
+            </View>
+            <View style={[styles.noDataIcon, { backgroundColor: '#EEF0FF' }]}>
+              <LockSimple size={30} color="#3F3BC9" weight="duotone" />
+            </View>
+            <Text style={styles.noDataTitle}>
+              {lang === 'tr' ? 'Kampüsünden henüz yeterli kişi yok' : 'Not enough people from your campus yet'}
+            </Text>
+            <Text style={styles.note}>
+              {lang === 'tr'
+                ? 'Kampüsünden yeterli kişi gelince oran burada açılacak. Arkadaşlarını davet et, ilk görenlerden ol.'
+                : "Once enough people from your campus join, the percentage will unlock here. Invite your friends and be among the first to see it."}
+            </Text>
+            <Pressable style={styles.inviteBtn} onPress={inviteCampus} accessibilityRole="button">
+              <Text style={styles.inviteText}>{lang === 'tr' ? 'Kampüsünü davet et' : 'Invite your campus'}</Text>
+            </Pressable>
+          </View>
+        </View>
+      );
     } else {
       noData = true;
       body = (
@@ -2544,14 +2616,14 @@ export default function HomeScreen() {
             active={filter}
             fg={fg}
             bg={bg}
-            profile={profile}
+            profile={fullProfile}
             consent={consent}
             lang={lang}
             hint={filterHint}
             onChoose={chooseFilter}
           />
 
-          {needsProfile && consent && value && !editing ? (
+          {needsProfile && consent && value && !editing && filter !== 'campus' ? (
             <Pressable onPress={() => setEditing(true)}>
               <Text style={[styles.editLink, { color: fg }]}>
                 {filter === 'country'
@@ -2943,6 +3015,22 @@ export default function HomeScreen() {
           </View>
         </ScrollView>
       </FadeIn>
+      {friendsTip && FRIENDS_TAB_ENABLED ? (
+        <View style={[styles.tipWrap, { bottom: TAB_BAR_HEIGHT + insets.bottom + 6 }]} pointerEvents="box-none">
+          <View style={styles.tip} accessibilityRole="alert">
+            <Text style={styles.tipTitle}>{lang === 'tr' ? 'Yeni: Arkadaşlar' : 'New: Friends'}</Text>
+            <Text style={styles.tipText}>
+              {lang === 'tr'
+                ? 'Yan yana QR okutarak arkadaş ekle, şu an ne yaptıklarını gör.'
+                : "Scan a QR code side by side to add friends and see what they're doing right now."}
+            </Text>
+            <Pressable style={styles.tipOk} onPress={dismissFriendsTip} hitSlop={8} accessibilityRole="button">
+              <Text style={styles.tipOkText}>{lang === 'tr' ? 'Anladım' : 'Got it'}</Text>
+            </Pressable>
+          </View>
+          <View style={styles.tipArrow} />
+        </View>
+      ) : null}
       {tabBar}
     </View>
   );
@@ -3167,6 +3255,42 @@ const styles = StyleSheet.create({
     marginTop: SP.xs,
   },
   noDataTitle: { fontFamily: F.bold, fontSize: FS.xl, color: INK, marginTop: SP.md },
+  inviteBtn: {
+    marginTop: SP.md,
+    backgroundColor: '#EEF0FF',
+    borderRadius: 999,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  inviteText: { fontFamily: F.bold, fontSize: FS.sm + 1, color: '#3F3BC9' },
+  tipWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
+  tip: {
+    width: 260,
+    backgroundColor: '#17284D',
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    gap: 4,
+    shadowColor: '#0F1A33',
+    shadowOpacity: 0.25,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 14,
+  },
+  tipTitle: { fontFamily: F.bold, fontSize: 14, color: '#FFFFFF' },
+  tipText: { fontFamily: F.regular, fontSize: 13, lineHeight: 18, color: '#C9D3EE' },
+  tipOk: { alignSelf: 'flex-end', paddingVertical: 4, paddingHorizontal: 4 },
+  tipOkText: { fontFamily: F.bold, fontSize: 13, color: '#A5B4FC' },
+  tipArrow: {
+    width: 16,
+    height: 16,
+    backgroundColor: '#17284D',
+    transform: [{ rotate: '45deg' }],
+    marginTop: -9,
+    elevation: 15,
+  },
   timerLabels: { flexDirection: 'row', justifyContent: 'space-between' },
   resultMiddle: { flex: 1, marginTop: SP.sm },
   resultScroll: { flexGrow: 1, justifyContent: 'center', paddingVertical: SP.sm },

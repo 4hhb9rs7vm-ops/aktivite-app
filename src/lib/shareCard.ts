@@ -243,6 +243,8 @@ function scopePhrase(filter: string, value: string | null | undefined, lang: Lan
       return lang === 'tr' ? locative(value) : `in ${value}`;
     case 'age':
       return lang === 'tr' ? `${value} yaş grubunda` : `among ${value}-year-olds`;
+    case 'campus':
+      return lang === 'tr' ? `${value} öğrencileri arasında` : `among ${value} students`;
     case 'gender':
       if (value === GENDER_NO_ANSWER) return world;
       if (value === 'Kadın') return lang === 'tr' ? 'kadınlar arasında' : 'among women';

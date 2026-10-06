@@ -221,6 +221,8 @@ function activityRatioLine(filter: string, value: string | null | undefined, lan
         return `Şu an ${value} yaş aralığında seninle aynı şeyi yapanların oranı`;
       case 'city':
         return `Şu an ${value} ilinde seninle aynı şeyi yapanların oranı`;
+      case 'campus':
+        return `Şu an ${value} öğrencileri arasında seninle aynı şeyi yapanların oranı`;
       case 'gender':
         if (value === GENDER_NO_ANSWER)
           return 'Şu an cinsiyetini belirtmemeyi tercih edenler arasında seninle aynı şeyi yapanların oranı';
@@ -236,6 +238,8 @@ function activityRatioLine(filter: string, value: string | null | undefined, lan
       return `Share of people aged ${value} doing the same as you right now`;
     case 'city':
       return `Share of people in ${value} doing the same as you right now`;
+    case 'campus':
+      return `Share of ${value} students doing the same as you right now`;
     case 'gender':
       if (value === GENDER_NO_ANSWER)
         return 'Share of people who prefer not to share their gender doing the same as you right now';
@@ -273,7 +277,7 @@ export const STRINGS = {
     change: 'Değiştir',
     consentTitle: 'Karşılaştırma için bilgi paylaşımı',
     consentP1:
-      'Ülke, yaş aralığı, şehir ve cinsiyet bilgilerin, seçtiğin aktivite ile birlikte anonim olarak sunucuya gönderilir. Adın, e-postan ya da telefon numaran istenmez.',
+      'Ülke, yaş aralığı, şehir, cinsiyet ve öğrenciysen üniversite bilgilerin, seçtiğin aktivite ile birlikte anonim olarak sunucuya gönderilir. Adın, e-postan ya da telefon numaran istenmez.',
     consentP2:
       'Bilgilerin yalnızca oranları hesaplamak için kullanılır ve aktivitenin geçerli olduğu 60 dakika boyunca hesaba katılır. İstediğin zaman Ben sekmesinden silebilirsin.',
     readPrivacy: 'Gizlilik politikasını oku',
@@ -344,7 +348,7 @@ export const STRINGS = {
     change: 'Change',
     consentTitle: 'Sharing info for comparison',
     consentP1:
-      'Your country, age range, city and gender are sent anonymously to our server together with the activity you picked. We never ask for your name, email or phone number.',
+      'Your country, age range, city, gender and, if you are a student, your university are sent anonymously to our server together with the activity you picked. We never ask for your name, email or phone number.',
     consentP2:
       'This info is only used to calculate the percentages, and only for the 60 minutes your activity is active. You can delete it anytime from the Me tab.',
     readPrivacy: 'Read the privacy policy',

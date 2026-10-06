@@ -876,7 +876,7 @@ const BIG = 84;
 const BIG_H = 104;
 
 function charWidth(ch: string) {
-  if (ch >= '0' && ch <= '9') return BIG * 0.66;
+  if (ch >= '0' && ch <= '9') return BIG * 0.72;
   if (ch === ',' || ch === '.') return BIG * 0.32;
   if (ch === '%') return BIG * 0.98;
   return BIG * 0.8;
@@ -909,9 +909,10 @@ function CountUp({ value, color, lang }: { value: number; color: string; lang: L
       {text.split('').map((ch, i) => (
         <Text
           key={i}
-          numberOfLines={1}
           allowFontScaling={false}
+          // Android: tek karakterlik kutuda "…" ile kesilmesin diye satır sınırı ve yazı tipi boşluğu yok
           style={{
+            includeFontPadding: false,
             width: charWidth(ch),
             height: BIG_H,
             textAlign: 'center',

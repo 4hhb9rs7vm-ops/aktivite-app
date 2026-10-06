@@ -96,6 +96,12 @@ const T = {
     streakDone: 'Bugünkü anını seçtin, yarın da gel',
     streakPending: 'Bugün bir an seç, serin devam etsin',
     streakStart: 'Bir an seç, serin başlasın',
+    notifications: 'Bildirimler',
+    dailyMoment: 'Günün Anı',
+    dailyMomentSub: 'Her gün herkese aynı anda, tek bildirim',
+    reminder: '1 saat sonra hatırlat',
+    reminderSub: 'Bir an seçtikten 1 saat sonra, günde en fazla 2 kez',
+    quiet: '22:00 – 09:00 arası bildirim gönderilmez.',
     settings: 'Ayarlar',
     language: 'Dil',
     privacy: 'Gizlilik politikası',
@@ -155,6 +161,12 @@ const T = {
     streakDone: "You've picked today's moment, come back tomorrow",
     streakPending: 'Pick a moment today to keep your streak',
     streakStart: 'Pick a moment to start your streak',
+    notifications: 'Notifications',
+    dailyMoment: "Today's Moment",
+    dailyMomentSub: 'Once a day, the same moment for everyone',
+    reminder: 'Remind me in an hour',
+    reminderSub: 'An hour after you pick a moment, up to twice a day',
+    quiet: 'No notifications between 10 PM and 9 AM.',
     settings: 'Settings',
     language: 'Language',
     privacy: 'Privacy policy',
@@ -192,6 +204,10 @@ export function MeTab({
   friendsSetup,
   onReset,
   onLangChange,
+  dailyMomentOn,
+  onDailyMomentChange,
+  reminderOn,
+  onReminderChange,
   privacyUrl,
   topInset,
   bottomSpace,
@@ -208,6 +224,10 @@ export function MeTab({
   friendsSetup: boolean;
   onReset: (deleteFriends: boolean) => void;
   onLangChange: (l: Lang) => void;
+  dailyMomentOn: boolean;
+  onDailyMomentChange: (on: boolean) => void;
+  reminderOn: boolean;
+  onReminderChange: (on: boolean) => void;
   privacyUrl: string;
   topInset: number;
   bottomSpace: number;
@@ -468,6 +488,46 @@ export function MeTab({
             </Text>
           </View>
         </View>
+
+        {/* Bildirimler */}
+        <Text style={styles.sectionTitle}>{t.notifications}</Text>
+        <View style={styles.listCard}>
+          <View style={[styles.row, styles.rowLine]}>
+            <Ionicons name="time-outline" size={20} color={SOFT} />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={styles.notifLabel}>{t.dailyMoment}</Text>
+              <Text style={styles.toggleSub}>{t.dailyMomentSub}</Text>
+            </View>
+            <Switch
+              value={dailyMomentOn}
+              onValueChange={(v) => {
+                tap(true);
+                onDailyMomentChange(v);
+              }}
+              trackColor={{ true: ACCENT, false: '#D5D7DE' }}
+              thumbColor="#FFFFFF"
+              ios_backgroundColor="#D5D7DE"
+            />
+          </View>
+          <View style={styles.row}>
+            <Ionicons name="alarm-outline" size={20} color={SOFT} />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={styles.notifLabel}>{t.reminder}</Text>
+              <Text style={styles.toggleSub}>{t.reminderSub}</Text>
+            </View>
+            <Switch
+              value={reminderOn}
+              onValueChange={(v) => {
+                tap(true);
+                onReminderChange(v);
+              }}
+              trackColor={{ true: ACCENT, false: '#D5D7DE' }}
+              thumbColor="#FFFFFF"
+              ios_backgroundColor="#D5D7DE"
+            />
+          </View>
+        </View>
+        <Text style={styles.quietNote}>{t.quiet}</Text>
 
         {/* Ayarlar */}
         <Text style={styles.sectionTitle}>{t.settings}</Text>
@@ -894,6 +954,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   toggleSub: { fontFamily: F.regular, fontSize: 12, color: MUTED },
+  notifLabel: { fontFamily: F.regular, fontSize: 15, color: INK },
+  quietNote: { fontFamily: F.regular, fontSize: 12, color: MUTED, marginTop: -8, marginLeft: 4 },
 
   streakCard: {
     backgroundColor: NAVY,

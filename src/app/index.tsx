@@ -92,11 +92,14 @@ import {
 } from '@/lib/i18n';
 import { buildStory, Story } from '@/lib/shareCard';
 import {
+  getMomentForDay,
   getNotifications,
   getTodayMoment,
   hasNotificationPermission,
+  isDailyMomentEnabled,
   requestNotificationPermission,
   scheduleDailyMoments,
+  setDailyMomentEnabled,
 } from '@/lib/notifications';
 import { FRIENDS_TAB_ENABLED, loadMe, Me, ME_KEY, saveMe, STUDENT } from '@/lib/me';
 import { UNIVERSITY_OTHER } from '@/lib/universities';
@@ -174,19 +177,37 @@ async function cancelMomentEndNotification() {
   } catch {}
 }
 
-// Sınırlar: günde en fazla 2 "an bitti" bildirimi, sadece 09:00 – 20:00 arasında
+// Bildirim kuralları (1.3):
+// • "Yeni an" hatırlatması: seçimden 60 dk sonra, kullanıcı açarsa; günde en fazla 2.
+//   (1.4'te arkadaş bildirimleri açık olanlarda günde 1'e inecek.)
+// • Sessiz saatler: 22:00 – 09:00 arası hatırlatma gitmez.
+// • Günün Anı'na 30 dk'dan yakınsa hatırlatma gitmez; Günün Anı zaten aynı soruyu soruyor.
+// • Kilitliyken istenirse, kilit bitince tek seferlik ekstra bildirim (günlük sınıra dahil değil).
+const REMIND_AFTER_MS = 60 * 60 * 1000;
 const END_NOTIF_DAILY_MAX = 2;
-const END_NOTIF_FROM_HOUR = 9;
-const END_NOTIF_UNTIL_HOUR = 20;
+const QUIET_FROM_HOUR = 22;
+const QUIET_UNTIL_HOUR = 9;
+const MOMENT_CLASH_MS = 30 * 60 * 1000;
+const LOCK_NOTIF_ID_KEY = 'lock_end_notif_id_v1';
 
-async function scheduleMomentEndNotification(endsAt: number, lang: Lang) {
+function inQuietHours(d: Date) {
+  const h = d.getHours();
+  return h >= QUIET_FROM_HOUR || h < QUIET_UNTIL_HOUR;
+}
+
+function nearDailyMoment(at: Date) {
+  const m = getMomentForDay(at).getTime();
+  return Math.abs(at.getTime() - m) < MOMENT_CLASH_MS;
+}
+
+async function scheduleMomentEndNotification(startedAt: number, lang: Lang) {
   await cancelMomentEndNotification();
-  const seconds = Math.round((endsAt - Date.now()) / 1000);
+  const fireAt = startedAt + REMIND_AFTER_MS;
+  const seconds = Math.round((fireAt - Date.now()) / 1000);
   if (seconds < 5) return;
-  const end = new Date(endsAt);
-  const h = end.getHours();
-  if (h < END_NOTIF_FROM_HOUR || h >= END_NOTIF_UNTIL_HOUR) return;
-  const day = `${end.getFullYear()}-${end.getMonth() + 1}-${end.getDate()}`;
+  const at = new Date(fireAt);
+  if (inQuietHours(at) || nearDailyMoment(at)) return;
+  const day = `${at.getFullYear()}-${at.getMonth() + 1}-${at.getDate()}`;
   let used = 0;
   try {
     const raw = await AsyncStorage.getItem(END_NOTIF_COUNT_KEY);
@@ -200,14 +221,40 @@ async function scheduleMomentEndNotification(endsAt: number, lang: Lang) {
     const tr = lang === 'tr';
     const id = await Notifications.scheduleNotificationAsync({
       content: {
-        title: tr ? 'Yeni anın hazır' : 'Your next moment is ready',
-        body: tr ? 'Yarım saat geçti. Şu an ne yapıyorsun?' : "Half an hour has passed. What are you up to now?",
+        title: tr ? 'Yeni bir an için hazır mısın?' : 'Ready for a new moment?',
+        body: tr
+          ? 'Şu an ne yapıyorsun? Bir an seç, seninle aynı olanları gör.'
+          : "What are you doing now? Pick a moment and see who's with you.",
       },
       trigger: { type: 'timeInterval', seconds, repeats: false } as any,
     });
     await AsyncStorage.setItem(END_NOTIF_ID_KEY, id);
     await AsyncStorage.setItem(END_NOTIF_COUNT_KEY, JSON.stringify({ day, count: used + 1 }));
   } catch {}
+}
+
+// Kilitliyken "haber ver" denirse: kilit bitince tek seferlik bildirim
+async function scheduleLockEndNotification(endsAt: number, lang: Lang): Promise<boolean> {
+  try {
+    const Notifications = getNotifications();
+    if (!Notifications) return false;
+    const old = await AsyncStorage.getItem(LOCK_NOTIF_ID_KEY);
+    if (old) await Notifications.cancelScheduledNotificationAsync(old).catch(() => {});
+    const seconds = Math.round((endsAt - Date.now()) / 1000);
+    if (seconds < 5) return false;
+    const tr = lang === 'tr';
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: tr ? 'Yeni anın hazır' : 'Your next moment is ready',
+        body: tr ? 'Artık yeni bir an seçebilirsin. Şu an ne yapıyorsun?' : 'You can pick a new moment now. What are you up to?',
+      },
+      trigger: { type: 'timeInterval', seconds, repeats: false } as any,
+    });
+    await AsyncStorage.setItem(LOCK_NOTIF_ID_KEY, id);
+    return true;
+  } catch {
+    return false;
+  }
 }
 const HISTORY_MAX = 600;
 type MomentEntry = { id: string; at: number; guess: number | null; pct: number | null };
@@ -1724,6 +1771,17 @@ const hs = StyleSheet.create({
     marginTop: SP.xs + 2,
   },
   noticeButtons: { flexDirection: 'row', gap: SP.sm, marginTop: SP.xl, alignSelf: 'stretch' },
+  noticeAsk: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: SP.md,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: '#F4F5F7',
+  },
+  noticeAskText: { fontFamily: F.bold, fontSize: FS.sm },
   noticeGhost: {
     flex: 1,
     borderRadius: 12,
@@ -1772,6 +1830,10 @@ export default function HomeScreen() {
   const [guess, setGuess] = useState<number | null>(null);
   const [lock, setLock] = useState<MomentLock | null>(null);
   const [lockNotice, setLockNotice] = useState(false);
+  // Kilit bitince tek seferlik bildirim istendi mi (bu kilit için)
+  const [lockAlertFor, setLockAlertFor] = useState<number | null>(null);
+  // Ben → Ayarlar: Günün Anı bildirimi açık mı
+  const [dailyMomentOn, setDailyMomentOn] = useState(true);
   const [carry, setCarry] = useState<number | null>(null);
   const [topNow, setTopNow] = useState<{ id: string; pct: number } | null>(null);
   const [pendingShare, setPendingShare] = useState(false);
@@ -1989,6 +2051,47 @@ export default function HomeScreen() {
     AsyncStorage.setItem(FRIENDS_TIP_KEY, '1').catch(() => {});
   }
 
+  useEffect(() => {
+    isDailyMomentEnabled().then(setDailyMomentOn).catch(() => {});
+  }, []);
+
+  async function ensureNotifPermission(): Promise<boolean> {
+    let ok = await hasNotificationPermission().catch(() => false);
+    if (!ok) ok = await requestNotificationPermission().catch(() => false);
+    if (!ok) {
+      const tr = lang === 'tr';
+      Alert.alert(
+        tr ? 'Bildirimler kapalı' : 'Notifications are off',
+        tr
+          ? 'Haber verebilmemiz için telefon ayarlarından Şu An bildirimlerini açman gerekiyor.'
+          : 'To let you know, please turn on notifications for Şu An in your phone settings.',
+        [
+          { text: tx.cancel, style: 'cancel' },
+          { text: tr ? 'Ayarlar' : 'Settings', onPress: () => Linking.openSettings().catch(() => {}) },
+        ]
+      );
+    }
+    return ok;
+  }
+
+  async function askLockAlert() {
+    if (!lock) return;
+    tap(true);
+    if (!(await ensureNotifPermission())) return;
+    const ok = await scheduleLockEndNotification(lock.startedAt + SESSION_MS, lang);
+    if (ok) setLockAlertFor(lock.startedAt);
+  }
+
+  async function toggleDailyMoment(next: boolean) {
+    if (next && !(await ensureNotifPermission())) return;
+    setDailyMomentOn(next);
+    setDailyMomentEnabled(next).catch(() => {});
+  }
+
+  async function toggleReminderFromSettings(next: boolean) {
+    await toggleEndNotify(next);
+  }
+
   // Kampüs daveti: standart metin + indirme bağlantısı, telefonun paylaşım menüsüyle
   function inviteCampus() {
     if (!campus) return;
@@ -2047,7 +2150,7 @@ export default function HomeScreen() {
     }
     setEndNotify(true);
     AsyncStorage.setItem(END_NOTIFY_KEY, 'yes').catch(() => {});
-    if (lock && lockActive()) scheduleMomentEndNotification(lock.startedAt + SESSION_MS, lang);
+    if (lock && lockActive()) scheduleMomentEndNotification(lock.startedAt, lang);
   }
 
   function updateHistory(fn: (h: MomentEntry[]) => MomentEntry[]) {
@@ -2121,7 +2224,7 @@ export default function HomeScreen() {
     AsyncStorage.setItem(LOCK_KEY, JSON.stringify(next)).catch(() => {});
     const firstToday = !history.some((e) => dayKey(e.at) === dayKey(t));
     updateHistory((h) => [...h, { id: a.id, at: windowStart, guess: null, pct: null }]);
-    if (endNotify) scheduleMomentEndNotification(windowStart + SESSION_MS, lang);
+    if (endNotify) scheduleMomentEndNotification(windowStart, lang);
     if (firstToday && computeStreak(history).count >= 1) {
       // Seri bir gün daha uzadı
       setTimeout(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}), 300);
@@ -2666,8 +2769,8 @@ export default function HomeScreen() {
             <View style={hs.notifyRow}>
               <Ionicons name={endNotify ? 'notifications' : 'notifications-outline'} size={16} color={endNotify ? fg : SOFT} />
               <View style={{ flex: 1 }}>
-                <Text style={hs.notifyText}>{lang === 'tr' ? 'An bitince bana haber ver' : 'Notify me when my moment ends'}</Text>
-                <Text style={hs.notifySub}>{lang === 'tr' ? 'Günde en fazla 2 kez, 09:00 – 20:00' : 'Up to twice a day, 9 AM – 8 PM'}</Text>
+                <Text style={hs.notifyText}>{lang === 'tr' ? '1 saat sonra bana hatırlat' : 'Remind me in an hour'}</Text>
+                <Text style={hs.notifySub}>{lang === 'tr' ? 'Günde en fazla 2 kez, 09:00 – 22:00' : 'Up to twice a day, 9 AM – 10 PM'}</Text>
               </View>
               <Switch
                 value={endNotify}
@@ -2676,7 +2779,7 @@ export default function HomeScreen() {
                 thumbColor="#ffffff"
                 ios_backgroundColor="#D9DBE1"
                 style={{ transform: [{ scale: 0.85 }] }}
-                accessibilityLabel={lang === 'tr' ? 'An bitince bana haber ver' : 'Notify me when my moment ends'}
+                accessibilityLabel={lang === 'tr' ? '1 saat sonra bana hatırlat' : 'Remind me in an hour'}
               />
             </View>
           </View>
@@ -2753,6 +2856,7 @@ export default function HomeScreen() {
   const streak = computeStreak(history);
   const lockVisible = !!lock && lockActive() && !!ACTIVITIES_BY_ID[lock.id];
   const lockLeft = lock ? Math.max(1, Math.ceil((SESSION_MS - (Date.now() - lock.startedAt)) / 60000)) : 0;
+  const lockAlertSet = !!lock && lockAlertFor === lock.startedAt;
 
   // ---- Alt menü ----
   const tabBottomSpace = TAB_BAR_HEIGHT + insets.bottom + SP.xxl;
@@ -2784,6 +2888,10 @@ export default function HomeScreen() {
           friendsSetup={friendsSetup}
           onReset={resetAll}
           onLangChange={changeLanguage}
+          dailyMomentOn={dailyMomentOn}
+          onDailyMomentChange={toggleDailyMoment}
+          reminderOn={endNotify}
+          onReminderChange={toggleReminderFromSettings}
           privacyUrl={PRIVACY_URLS[lang]}
           topInset={insets.top}
           bottomSpace={tabBottomSpace}
@@ -2927,6 +3035,18 @@ export default function HomeScreen() {
                           ? `Şu an "${activityName(lock!.id, lang)}" anındasın. Yeni bir an seçmek için ${lockLeft} dk kaldı.`
                           : `You're in your "${activityName(lock!.id, lang)}" moment. A new one opens in ${lockLeft} min.`}
                       </Text>
+                      {lockAlertSet ? (
+                        <Text style={[hs.noticeText, { color: ACTIVITIES_BY_ID[lock!.id].fg }]}>
+                          {lang === 'tr' ? '✓ Kilit bitince sana haber vereceğiz.' : "✓ We'll let you know when it opens."}
+                        </Text>
+                      ) : (
+                        <Pressable style={hs.noticeAsk} onPress={askLockAlert} accessibilityRole="button">
+                          <Ionicons name="notifications-outline" size={17} color={ACTIVITIES_BY_ID[lock!.id].fg} />
+                          <Text style={[hs.noticeAskText, { color: ACTIVITIES_BY_ID[lock!.id].fg }]}>
+                            {lang === 'tr' ? 'An bitince sana haber verelim mi?' : 'Want us to tell you when it opens?'}
+                          </Text>
+                        </Pressable>
+                      )}
                       <View style={hs.noticeButtons}>
                         <Pressable
                           style={hs.noticeGhost}

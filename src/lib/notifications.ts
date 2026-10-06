@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { loadLang, NOTIF_TEXT } from '@/lib/i18n';
 
@@ -133,10 +134,33 @@ export async function cancelDailyMoments(): Promise<void> {
   );
 }
 
+// Ben → Ayarlar'dan "Günün Anı" kapatılabilir (varsayılan açık)
+export const DAILY_MOMENT_KEY = 'daily_moment_enabled_v1';
+
+export async function isDailyMomentEnabled(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(DAILY_MOMENT_KEY)) !== 'no';
+  } catch {
+    return true;
+  }
+}
+
+export async function setDailyMomentEnabled(on: boolean): Promise<void> {
+  try {
+    await AsyncStorage.setItem(DAILY_MOMENT_KEY, on ? 'yes' : 'no');
+  } catch {}
+  if (on) await scheduleDailyMoments();
+  else await cancelDailyMoments();
+}
+
 // Dil değiştiğinde de çağrılır; bildirim metni seçili dilde planlanır
 export async function scheduleDailyMoments(): Promise<void> {
   const Notifications = getNotifications();
   if (!Notifications) return;
+  if (!(await isDailyMomentEnabled())) {
+    await cancelDailyMoments();
+    return;
+  }
   if (!(await hasNotificationPermission())) return;
   await ensureChannel();
   await cancelDailyMoments();

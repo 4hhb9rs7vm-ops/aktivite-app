@@ -1,13 +1,12 @@
 // QR ile arkadaş ekleme: "Kodum" (kodu göster) ve "Kod okut" (kamera + onay).
 // Kodu gösteren kişi eşleşmeye razıdır; okutan kişi onaylayınca ikisi aynı anda eklenir.
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import QRCode from 'react-native-qrcode-svg';
-import Ionicons from '@expo/vector-icons/Ionicons';
-import * as Haptics from 'expo-haptics';
 
-import { Lang } from '@/lib/i18n';
 import {
   avatarColors,
   createPairCode,
@@ -20,6 +19,7 @@ import {
   qrValue,
   redeemPairCode,
 } from '@/lib/friends';
+import { Lang } from '@/lib/i18n';
 import { nameInitial } from '@/lib/me';
 
 const INK = '#16161A';
@@ -47,10 +47,14 @@ const T = {
     cancel: 'Vazgeç',
     retry: 'Tekrar dene',
     scanAgain: 'Tekrar okut',
-    camTitle: 'Kamera izni gerekiyor',
-    camText: 'Arkadaşının kodunu okutmak için kameraya erişmemiz gerekiyor. Kamera sadece kod okurken açılır.',
-    camAllow: 'İzin ver',
-    camSettings: 'Ayarları aç',
+    camTitle: 'Kod okutmak için kamera',
+    camText:
+      'Arkadaşının kodunu okutmak için Şu An kamerayı kullanır. Kamera sadece kod okurken açılır, hiçbir şey kaydedilmez.',
+    camContinue: 'Devam',
+    camDeniedTitle: 'Kamera erişimi kapalı',
+    camDeniedText:
+      "Kod okutmak istersen Ayarlar'dan Şu An için kamera erişimini açabilirsin. Kodum sekmesinden kendi kodunu göstermeye devam edebilirsin.",
+    camSettings: "Ayarlar'ı aç",
     notOurs: 'Bu bir Şu An kodu değil.',
     errors: {
       expired: 'Kodun süresi dolmuş. Arkadaşından kodu yenilemesini iste.',
@@ -80,10 +84,13 @@ const T = {
     cancel: 'Cancel',
     retry: 'Try again',
     scanAgain: 'Scan again',
-    camTitle: 'Camera access needed',
-    camText: "To scan your friend's code we need the camera. It's only on while scanning.",
-    camAllow: 'Allow',
-    camSettings: 'Open settings',
+    camTitle: 'Camera for scanning codes',
+    camText: "Şu An uses the camera to scan your friend's code. It's only on while scanning, and nothing is recorded.",
+    camContinue: 'Continue',
+    camDeniedTitle: 'Camera access is off',
+    camDeniedText:
+      'If you want to scan codes, you can turn on camera access for Şu An in Settings. You can still show your own code from the My code tab.',
+    camSettings: 'Open Settings',
     notOurs: "This isn't a Şu An code.",
     errors: {
       expired: 'This code has expired. Ask your friend to refresh it.',
@@ -361,18 +368,21 @@ function ScanCode({ lang, onDone }: { lang: Lang; onDone: (name: string) => void
   }
 
   if (!permission.granted) {
+    // İzin daha önce reddedildiyse sistem tekrar soramaz: Ayarlar'a yönlendir.
+    const denied = !permission.canAskAgain;
     return (
       <View style={[styles.body, { gap: 12 }]}>
         <View style={styles.camIcon}>
-          <Ionicons name="camera-outline" size={28} color={ACCENT} />
+          <Ionicons name={denied ? 'camera-reverse-outline' : 'camera-outline'} size={28} color={ACCENT} />
         </View>
-        <Text style={styles.centerTitle}>{t.camTitle}</Text>
-        <Text style={styles.hint}>{t.camText}</Text>
+        <Text style={styles.centerTitle}>{denied ? t.camDeniedTitle : t.camTitle}</Text>
+        <Text style={styles.hint}>{denied ? t.camDeniedText : t.camText}</Text>
         <Pressable
           style={styles.primaryBtn}
-          onPress={() => (permission.canAskAgain ? requestPermission() : Linking.openSettings())}
+          onPress={() => (denied ? Linking.openSettings() : requestPermission())}
+          accessibilityRole="button"
         >
-          <Text style={styles.primaryText}>{permission.canAskAgain ? t.camAllow : t.camSettings}</Text>
+          <Text style={styles.primaryText}>{denied ? t.camSettings : t.camContinue}</Text>
         </Pressable>
       </View>
     );
@@ -488,7 +498,7 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: 'rgba(255,255,255,0.9)',
   },
-  camOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(14,20,36,0.55)', alignItems: 'center', justifyContent: 'center' },
+  camOverlay: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(14,20,36,0.55)', alignItems: 'center', justifyContent: 'center' },
   primaryBtn: {
     alignSelf: 'stretch',
     backgroundColor: ACCENT,

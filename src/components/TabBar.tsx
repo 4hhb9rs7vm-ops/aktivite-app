@@ -1,11 +1,11 @@
-// İnce alt menü: Şu An · Arkadaşlar · Ben
+// İnce alt menü: Şu An · Arkadaşlar · Anketler · Ben
 // Ekrandan ayrışsın diye: üstte gölge ve çizgi, seçili sekmede simgenin arkasında renkli bir kapsül.
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { Lang } from '@/lib/i18n';
 
-export type TabId = 'now' | 'friends' | 'me';
+export type TabId = 'now' | 'friends' | 'polls' | 'me';
 
 export const TAB_BAR_HEIGHT = 64;
 
@@ -16,12 +16,14 @@ const IDLE = '#6B6F7B';
 const LABELS: Record<TabId, { tr: string; en: string }> = {
   now: { tr: 'Şu An', en: 'Now' },
   friends: { tr: 'Arkadaşlar', en: 'Friends' },
+  polls: { tr: 'Anketler', en: 'Polls' },
   me: { tr: 'Ben', en: 'Me' },
 };
 
 const ICONS: Record<TabId, { on: keyof typeof Ionicons.glyphMap; off: keyof typeof Ionicons.glyphMap }> = {
   now: { on: 'home', off: 'home-outline' },
   friends: { on: 'people', off: 'people-outline' },
+  polls: { on: 'chatbubbles', off: 'chatbubbles-outline' },
   me: { on: 'person', off: 'person-outline' },
 };
 
@@ -30,15 +32,20 @@ export function TabBar({
   onChange,
   lang,
   showFriends,
+  showPolls = false,
   bottomInset,
 }: {
   active: TabId;
   onChange: (t: TabId) => void;
   lang: Lang;
   showFriends: boolean;
+  showPolls?: boolean; // Anketler sekmesi (seri başlayınca ve çevirisi olan dillerde)
   bottomInset: number;
 }) {
-  const tabs: TabId[] = showFriends ? ['now', 'friends', 'me'] : ['now', 'me'];
+  const tabs: TabId[] = ['now'];
+  if (showFriends) tabs.push('friends');
+  if (showPolls) tabs.push('polls');
+  tabs.push('me');
   return (
     <View
       style={[styles.bar, { height: TAB_BAR_HEIGHT + bottomInset, paddingBottom: bottomInset }]}
@@ -86,7 +93,7 @@ const styles = StyleSheet.create({
       default: {},
     }),
   },
-  item: { width: 96, alignItems: 'center', gap: 3 },
+  item: { flex: 1, maxWidth: 96, alignItems: 'center', gap: 3 },
   pill: { width: 58, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   pillOn: { backgroundColor: ACTIVE_BG },
   label: { fontFamily: 'DMSans_500Medium', fontSize: 11 },

@@ -47,14 +47,11 @@ const T = {
     cancel: 'Vazgeç',
     retry: 'Tekrar dene',
     scanAgain: 'Tekrar okut',
-    camTitle: 'Kod okutmak için kamera',
-    camText:
-      'Arkadaşının kodunu okutmak için Şu An kamerayı kullanır. Kamera sadece kod okurken açılır, hiçbir şey kaydedilmez.',
-    camContinue: 'Devam',
-    camDeniedTitle: 'Kamera erişimi kapalı',
-    camDeniedText:
-      "Kod okutmak istersen Ayarlar'dan Şu An için kamera erişimini açabilirsin. Kodum sekmesinden kendi kodunu göstermeye devam edebilirsin.",
-    camSettings: "Ayarlar'ı aç",
+    camTitle: 'Kodu kamerayla okut',
+    camText: 'Arkadaşının QR kodunu okutmak için kamera kullanılır. Kamera yalnızca kod okurken açılır, hiçbir şey kaydedilmez.',
+    camDenied: 'Kamera erişimi kapalı. Kod okutmak için Ayarlar\'dan açabilirsin. İstersen kendi kodunu gösterip arkadaşına okutabilirsin.',
+    camAllow: 'Devam',
+    camSettings: 'Ayarları aç',
     notOurs: 'Bu bir Şu An kodu değil.',
     errors: {
       expired: 'Kodun süresi dolmuş. Arkadaşından kodu yenilemesini iste.',
@@ -84,12 +81,10 @@ const T = {
     cancel: 'Cancel',
     retry: 'Try again',
     scanAgain: 'Scan again',
-    camTitle: 'Camera for scanning codes',
-    camText: "Şu An uses the camera to scan your friend's code. It's only on while scanning, and nothing is recorded.",
-    camContinue: 'Continue',
-    camDeniedTitle: 'Camera access is off',
-    camDeniedText:
-      'If you want to scan codes, you can turn on camera access for Şu An in Settings. You can still show your own code from the My code tab.',
+    camTitle: 'Scan with your camera',
+    camText: "The camera is used to scan your friend's QR code. It's only on while scanning and nothing is recorded.",
+    camDenied: "Camera access is off. You can turn it on in Settings to scan codes, or show your own code for your friend to scan.",
+    camAllow: 'Continue',
     camSettings: 'Open Settings',
     notOurs: "This isn't a Şu An code.",
     errors: {
@@ -368,21 +363,18 @@ function ScanCode({ lang, onDone }: { lang: Lang; onDone: (name: string) => void
   }
 
   if (!permission.granted) {
-    // İzin daha önce reddedildiyse sistem tekrar soramaz: Ayarlar'a yönlendir.
-    const denied = !permission.canAskAgain;
     return (
       <View style={[styles.body, { gap: 12 }]}>
         <View style={styles.camIcon}>
-          <Ionicons name={denied ? 'camera-reverse-outline' : 'camera-outline'} size={28} color={ACCENT} />
+          <Ionicons name="camera-outline" size={28} color={ACCENT} />
         </View>
-        <Text style={styles.centerTitle}>{denied ? t.camDeniedTitle : t.camTitle}</Text>
-        <Text style={styles.hint}>{denied ? t.camDeniedText : t.camText}</Text>
+        <Text style={styles.centerTitle}>{t.camTitle}</Text>
+        <Text style={styles.hint}>{permission.canAskAgain ? t.camText : t.camDenied}</Text>
         <Pressable
           style={styles.primaryBtn}
-          onPress={() => (denied ? Linking.openSettings() : requestPermission())}
-          accessibilityRole="button"
+          onPress={() => (permission.canAskAgain ? requestPermission() : Linking.openSettings())}
         >
-          <Text style={styles.primaryText}>{denied ? t.camSettings : t.camContinue}</Text>
+          <Text style={styles.primaryText}>{permission.canAskAgain ? t.camAllow : t.camSettings}</Text>
         </Pressable>
       </View>
     );

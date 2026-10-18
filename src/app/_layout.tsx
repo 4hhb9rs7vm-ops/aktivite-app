@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
-import { AppState } from 'react-native';
 import { DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
+import { AppState } from 'react-native';
 
+import { DailyQuestionGate } from '@/components/DailyQuestionGate';
 import { scheduleDailyMoments } from '@/lib/notifications';
 
 // Yerel açılış ekranı (lacivert zemin + logo), ana ekran hazır olana kadar açık kalır.
@@ -37,6 +38,8 @@ export default function RootLayout() {
     <ThemeProvider value={DefaultTheme}>
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false }} />
+      {/* Günün Sorusu: açılış animasyonundan sonra, günde bir kez tam ekran soru */}
+      <DailyQuestionGate />
     </ThemeProvider>
   );
 }

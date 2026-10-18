@@ -106,6 +106,8 @@ import { UNIVERSITY_OTHER } from '@/lib/universities';
 import { TAB_BAR_HEIGHT, TabBar, TabId } from '@/components/TabBar';
 import { MeTab } from '@/components/MeTab';
 import { ActivityInfo, FriendsTab } from '@/components/FriendsTab';
+import { PollsTab } from '@/components/PollsTab';
+import { pollsVisible } from '@/lib/dailyQuestion';
 import {
   deleteFriendData,
   FRIEND_MUTES_KEY,
@@ -128,6 +130,9 @@ const SPLASH_MS = 3500;
 // Davet bağlantısı: telefonu tanıyıp App Store'a ya da Google Play'e yönlendiren sayfa
 const INVITE_URL = 'https://4hhb9rs7vm-ops.github.io/aktivite-app/indir/';
 const FRIENDS_TIP_KEY = 'friends_tip_seen_v1';
+// 1.3.0 (9): ilk açılışta "Hoş geldin" kartı ve ilk sonuçta paylaş ipucu (cihaz başına bir kez)
+const WELCOME_KEY = 'welcome_seen_v2';
+const SHARE_TIP_KEY = 'share_tip_seen_v1';
 
 const PRIVACY_URLS: Record<Lang, string> = {
   tr: 'https://4hhb9rs7vm-ops.github.io/aktivite-app/gizlilik/',
@@ -1313,6 +1318,7 @@ function SharePreviewSheet({
   cancelLabel,
   onShare,
   onClose,
+  onDismiss,
 }: {
   visible: boolean;
   story: Story;
@@ -1323,11 +1329,19 @@ function SharePreviewSheet({
   cancelLabel: string;
   onShare: () => void;
   onClose: () => void;
+  onDismiss?: () => void;
 }) {
   const title = lang === 'tr' ? 'Paylaşmaya hazır' : 'Ready to share';
   const shareLabel = lang === 'tr' ? 'Paylaş' : 'Share';
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+      onDismiss={onDismiss}
+      statusBarTranslucent
+    >
       <View style={styles.sheetBackdrop}>
         <Pressable style={ABS_FILL} onPress={onClose} accessibilityLabel={cancelLabel} />
         <View style={styles.sheet}>
@@ -1795,6 +1809,120 @@ const hs = StyleSheet.create({
   noticePrimaryText: { fontFamily: F.medium, fontSize: FS.sm, color: '#ffffff' },
 });
 
+// ---- 1.3.0 (9): Hoş geldin kartı ----
+function WelcomeSheet({
+  visible,
+  lang,
+  onStart,
+  onInvite,
+}: {
+  visible: boolean;
+  lang: Lang;
+  onStart: () => void;
+  onInvite: () => void;
+}) {
+  const tr = lang === 'tr';
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onStart} statusBarTranslucent>
+      <View style={ws.backdrop}>
+        <View style={ws.sheet}>
+          <View style={ws.handle} />
+          <Text style={ws.emoji}>🎉</Text>
+          <Text style={ws.title}>
+            {tr ? 'Hoş geldin,' : 'Welcome,'}
+            {'\n'}
+            <Text style={ws.titleAccent}>{tr ? 'ilk gelenlerdensin.' : "you're one of the first."}</Text>
+          </Text>
+          <Text style={ws.body}>
+            {tr
+              ? 'Oranlar, bir anda yeterli kişi toplanınca açılır. İlk günlerde bazı ekranlar boş görünebilir; birlikte dolduracağız.'
+              : "Rates unlock once enough people are here at the same moment. Some screens may look empty in the first days; we'll fill them together."}
+          </Text>
+          <View style={ws.row}>
+            <View style={ws.rowIcon}>
+              <Text style={ws.rowEmoji}>✨</Text>
+            </View>
+            <Text style={ws.rowText}>
+              {tr ? 'Her seçim, oranların açılmasına bir adım daha.' : 'Every pick brings the rates one step closer.'}
+            </Text>
+          </View>
+          <View style={ws.row}>
+            <View style={ws.rowIcon}>
+              <Text style={ws.rowEmoji}>🔒</Text>
+            </View>
+            <Text style={ws.rowText}>
+              {tr ? 'Oranlarda kim olduğun değil, sadece toplamlar görünür.' : 'Rates show totals only, never who you are.'}
+            </Text>
+          </View>
+          <Pressable style={ws.primary} onPress={onStart} accessibilityRole="button">
+            <Text style={ws.primaryText}>{tr ? 'Başlayalım' : "Let's go"}</Text>
+          </Pressable>
+          <Pressable style={ws.secondary} onPress={onInvite} accessibilityRole="button">
+            <Text style={ws.secondaryText}>{tr ? 'Arkadaşını davet et' : 'Invite a friend'}</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ---- 1.3.0 (9): Paylaş ipucu (paylaş düğmesi öne çıkar, gerisi kararır) ----
+type TipRect = { x: number; y: number; w: number; h: number };
+function ShareTipOverlay({
+  rect,
+  fg,
+  label,
+  lang,
+  onClose,
+  onShare,
+}: {
+  rect: TipRect | null;
+  fg: string;
+  label: string;
+  lang: Lang;
+  onClose: () => void;
+  onShare: () => void;
+}) {
+  const tr = lang === 'tr';
+  if (!rect) return null;
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      <Pressable style={ws.dim} onPress={onClose}>
+        {/* Balon: düğmenin hemen üstünde */}
+        <View style={[ws.tipArea, { height: Math.max(0, rect.y - 14) }]} pointerEvents="box-none">
+          <Pressable style={ws.tip} onPress={() => {}}>
+            <Text style={ws.tipTitle}>{tr ? '📸 Bunu hikâyende paylaş!' : '📸 Share this on your story!'}</Text>
+            <Text style={ws.tipText}>
+              {tr
+                ? "Sonucun, Instagram'a hazır eğlenceli bir karta dönüşür. Arkadaşların da kaçta kaç olduklarını merak etsin."
+                : 'Your result turns into a fun card ready for Instagram. Let your friends wonder where they stand too.'}
+            </Text>
+            <Pressable style={ws.tipOk} onPress={onClose} hitSlop={8} accessibilityRole="button">
+              <Text style={ws.tipOkText}>{tr ? 'Tamam' : 'OK'}</Text>
+            </Pressable>
+          </Pressable>
+          <View style={ws.tipArrow} />
+        </View>
+        {/* Öne çıkan paylaş düğmesi (gerçeğinin tam üstünde) */}
+        <View style={[ws.ring, { top: rect.y - 6, left: rect.x - 6, width: rect.w + 12, height: rect.h + 12 }]}>
+          <Pressable
+            style={[styles.primaryAction, { backgroundColor: fg, flex: 1 }]}
+            onPress={onShare}
+            accessibilityRole="button"
+          >
+            <Ionicons name="share-social-outline" size={18} color="#ffffff" />
+            <Text style={styles.primaryActionText}>{label}</Text>
+          </Pressable>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function hhmm(d: Date) {
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 export default function HomeScreen() {
   const [fontsLoaded] = useFonts({ DMSans_400Regular, DMSans_500Medium, DMSans_700Bold });
   const insets = useSafeAreaInsets();
@@ -1846,6 +1974,12 @@ export default function HomeScreen() {
   const [friendsSetup, setFriendsSetup] = useState(false);
   // Arkadaşlar sekmesi için tek seferlik ipucu balonu
   const [friendsTip, setFriendsTip] = useState(false);
+  // 1.3.0 (9): Hoş geldin kartı ve paylaş ipucu
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+  const [welcomeCheck, setWelcomeCheck] = useState(0);
+  const pendingShareUri = useRef<string | null>(null);
+  const [shareTipRect, setShareTipRect] = useState<TipRect | null>(null);
+  const shareBtnRef = useRef<View>(null);
   // Kampüs karşılaştırması: sadece öğrenci olup listeden üniversite seçenler için
   const campus =
     me.occupation === STUDENT && me.university && me.university !== UNIVERSITY_OTHER ? me.university : undefined;
@@ -2050,6 +2184,74 @@ export default function HomeScreen() {
   function dismissFriendsTip() {
     setFriendsTip(false);
     AsyncStorage.setItem(FRIENDS_TIP_KEY, '1').catch(() => {});
+  }
+
+  // Hoş geldin kartı: ilk açılışta ana ekranda bir kez (Ben → Sıfırla sonrası yeniden).
+  useEffect(() => {
+    if (!ready || !splashDone || selected || tab !== 'now') return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    AsyncStorage.getItem(WELCOME_KEY)
+      .then((seen) => {
+        if (seen || cancelled) return;
+        AsyncStorage.setItem(WELCOME_KEY, '1').catch(() => {});
+        timer = setTimeout(() => {
+          if (!cancelled) setWelcomeOpen(true);
+        }, 600);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [ready, splashDone, selected, tab, welcomeCheck]);
+
+  function closeWelcome() {
+    tap(true);
+    setWelcomeOpen(false);
+  }
+
+  function inviteFromWelcome() {
+    tap();
+    setWelcomeOpen(false);
+    const message =
+      lang === 'tr'
+        ? `Şu an kaç kişi seninle aynı şeyi yapıyor? Şu An'ı indir, birlikte görelim: ${INVITE_URL}`
+        : `How many people are doing the same thing as you right now? Get Şu An and let's find out: ${INVITE_URL}`;
+    // Kart kapanırken paylaşım menüsü açılınca iOS'ta çakışmasın diye kısa bekleme
+    setTimeout(() => Share.share({ message }).catch(() => {}), 450);
+  }
+
+  // Paylaş ipucu: ilk sonuç ekranında (oran ya da "henüz veri yok") bir kez.
+  // Filtre ipucu ya da bildirim kartı açıksa onların bitmesini bekler.
+  const shareBtnVisible =
+    !!selected && !guessing && (ratio !== null || ratioError) && !loading;
+  useEffect(() => {
+    if (!shareBtnVisible || filterHint || notifPrompt || sharePreviewOpen || pendingShare) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    AsyncStorage.getItem(SHARE_TIP_KEY)
+      .then((seen) => {
+        if (seen || cancelled) return;
+        timer = setTimeout(() => {
+          if (cancelled || !shareBtnRef.current) return;
+          shareBtnRef.current.measureInWindow((x, y, w, h) => {
+            if (cancelled || !w || !h) return;
+            AsyncStorage.setItem(SHARE_TIP_KEY, '1').catch(() => {});
+            setShareTipRect({ x, y, w, h });
+          });
+        }, 1200);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [shareBtnVisible, filterHint, notifPrompt, sharePreviewOpen, pendingShare]);
+
+  function closeShareTip() {
+    tap(true);
+    setShareTipRect(null);
   }
 
   useEffect(() => {
@@ -2365,6 +2567,9 @@ export default function HomeScreen() {
     // Not: 30 dakikalık seçim kilidi bilinçli olarak silinmez (kişisel veri değil, kural sayacı)
     const keepFriends = friendsSetup && !deleteFriends;
     await AsyncStorage.multiRemove(['profile', 'consent', HISTORY_KEY, ME_KEY]);
+    // Sıfırlanınca ilk açılış deneyimi de baştan: hoş geldin kartı, paylaş ipucu, filtre ipucu
+    await AsyncStorage.multiRemove([WELCOME_KEY, SHARE_TIP_KEY, 'filterHintSeen']);
+    setWelcomeCheck((n) => n + 1);
     if (friendsSetup && deleteFriends) {
       try {
         await deleteFriendData();
@@ -2403,26 +2608,42 @@ export default function HomeScreen() {
     setSharePreviewOpen(true);
   }
 
-  // Önizlemede "Paylaş": paneli kapat, kapanış animasyonu bitince görseli üret ve paylaş
+  // Önizlemede "Paylaş": görseli panel açıkken üret, paneli kapat,
+  // panel tamamen kapanınca paylaşım menüsünü aç. (iOS, panel kapanırken açılan paylaşım menüsünü göstermiyor.)
   async function shareStory() {
     if (!selected || !shareRef.current) return;
     tap();
-    setSharePreviewOpen(false);
-    await new Promise((r) => setTimeout(r, 400));
+    let uri: string;
     try {
       // iOS'ta width/height "nokta" cinsinden alınıp ekran ölçeğiyle çarpılıyor
       // (3x ekranda 1080 → 3240 piksel, ~12 MB). Ölçeğe bölerek gerçek 1080x1920 elde ediyoruz.
       const scale = Platform.OS === 'ios' ? PixelRatio.get() : 1;
-      const uri = await captureRef(shareRef, {
+      uri = await captureRef(shareRef, {
         format: 'jpg',
         quality: 0.92,
         result: 'tmpfile',
         width: Math.round(1080 / scale),
         height: Math.round(1920 / scale),
       });
+    } catch {
+      setSharePreviewOpen(false);
+      Alert.alert(tx.shareErrorTitle, tx.shareErrorText);
+      return;
+    }
+    pendingShareUri.current = uri;
+    setSharePreviewOpen(false);
+    // iOS'ta panelin onDismiss'i tetikler; Android'de ya da tetiklenmezse yedek zamanlayıcı
+    setTimeout(openShareSheet, Platform.OS === 'ios' ? 1200 : 450);
+  }
+
+  async function openShareSheet() {
+    const uri = pendingShareUri.current;
+    if (!uri) return;
+    pendingShareUri.current = null;
+    try {
       const available = await Sharing.isAvailableAsync();
       if (available) {
-        await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: tx.shareDialog });
+        await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', UTI: 'public.jpeg', dialogTitle: tx.shareDialog });
       } else {
         Alert.alert(tx.shareUnavailableTitle, tx.shareUnavailableText);
       }
@@ -2504,6 +2725,12 @@ export default function HomeScreen() {
     const shareLine = ratioLine(filter, value, lang, !!selected.mood);
 
     const elapsed = startedAt ? now - startedAt : 0;
+    // Boş ekranda gösterilecek bugünkü Günün Anı saati (henüz geçmediyse)
+    let nextMoment: Date | null = null;
+    try {
+      const m = getMomentForDay(new Date(now));
+      if (m.getTime() > now) nextMoment = m;
+    } catch {}
     const remainingMin = Math.max(0, Math.ceil((SESSION_MS - elapsed) / 60000));
 
     let resultShown = false;
@@ -2659,17 +2886,32 @@ export default function HomeScreen() {
               <UsersThree size={32} color={fg} weight="duotone" />
             </View>
             <Text style={styles.noDataTitle}>
-              {isNight() ? (lang === 'tr' ? 'Gece sakin' : 'The night is quiet') : tx.firstTitle}
+              {isNight()
+                ? lang === 'tr'
+                  ? 'Gece sakin'
+                  : 'The night is quiet'
+                : lang === 'tr'
+                  ? 'İlk gelenlerdensin ⭐'
+                  : "You're one of the first ⭐"}
             </Text>
             <Text style={styles.note}>
               {isNight()
                 ? lang === 'tr'
                   ? 'Bu saatte uyanık olanlar azınlıkta. Ortalık kalabalıklaştıkça oranın burada belirecek.'
                   : "Few people are awake right now. Your ratio will appear here as things get busier."
-                : selected.mood
-                  ? tx.firstNoteMood
-                  : tx.firstNote}
+                : lang === 'tr'
+                  ? "Şu an burada az kişi var. Herkes Günün Anı'nda aynı anda cevaplıyor; oranlar en çok o an açılıyor."
+                  : 'Only a few people are here right now. Everyone answers together at the Moment of the Day, when rates are most likely to unlock.'}
             </Text>
+            {!isNight() && nextMoment ? (
+              <View style={ws.momentPill}>
+                <Ionicons name="time-outline" size={15} color={fg} />
+                <Text style={ws.momentPillText}>
+                  {lang === 'tr' ? 'Bugünün Anı: ' : "Today's Moment: "}
+                  <Text style={[ws.momentPillStrong, { color: fg }]}>{hhmm(nextMoment)}</Text>
+                </Text>
+              </View>
+            ) : null}
             {guess !== null && filter === 'world' ? (
               <Text style={[styles.note, { color: SOFT }]}>
                 {lang === 'tr'
@@ -2787,10 +3029,12 @@ export default function HomeScreen() {
 
           <View style={styles.buttonsCol}>
             {resultShown || noData ? (
-              <Pressable style={[styles.primaryAction, { backgroundColor: fg }]} onPress={openSharePreview}>
-                <Ionicons name="share-social-outline" size={18} color="#ffffff" />
-                <Text style={styles.primaryActionText}>{selected.mood ? tx.shareMood : tx.shareActivity}</Text>
-              </Pressable>
+              <View ref={shareBtnRef} collapsable={false}>
+                <Pressable style={[styles.primaryAction, { backgroundColor: fg }]} onPress={openSharePreview}>
+                  <Ionicons name="share-social-outline" size={18} color="#ffffff" />
+                  <Text style={styles.primaryActionText}>{selected.mood ? tx.shareMood : tx.shareActivity}</Text>
+                </Pressable>
+              </View>
             ) : null}
             {inGrace() ? (
               <Pressable
@@ -2829,6 +3073,7 @@ export default function HomeScreen() {
               cancelLabel={tx.cancel}
               onShare={shareStory}
               onClose={() => setSharePreviewOpen(false)}
+              onDismiss={() => setTimeout(openShareSheet, 150)}
             />
           </>
         ) : null}
@@ -2842,6 +3087,19 @@ export default function HomeScreen() {
             onDecline={declineNotifications}
           />
         ) : null}
+
+        <ShareTipOverlay
+          rect={resultShown || noData ? shareTipRect : null}
+          fg={fg}
+          label={selected.mood ? tx.shareMood : tx.shareActivity}
+          lang={lang}
+          onClose={closeShareTip}
+          onShare={() => {
+            // İpucu penceresi tamamen kapanmadan paylaşım paneli açılırsa iOS paneli göstermiyor; kısa bekleme
+            setShareTipRect(null);
+            setTimeout(openSharePreview, 450);
+          }}
+        />
       </SafeAreaView>
     );
   }
@@ -2867,6 +3125,7 @@ export default function HomeScreen() {
       onChange={switchTab}
       lang={lang}
       showFriends={FRIENDS_TAB_ENABLED}
+      showPolls={pollsVisible(lang)}
       bottomInset={insets.bottom}
     />
   );
@@ -2897,6 +3156,15 @@ export default function HomeScreen() {
           topInset={insets.top}
           bottomSpace={tabBottomSpace}
         />
+        {tabBar}
+      </View>
+    );
+  }
+
+  if (tab === 'polls' && pollsVisible(lang)) {
+    return (
+      <View style={styles.homeRoot}>
+        <PollsTab lang={lang} topInset={insets.top} bottomSpace={tabBottomSpace} />
         {tabBar}
       </View>
     );
@@ -3153,6 +3421,7 @@ export default function HomeScreen() {
         </View>
       ) : null}
       {tabBar}
+      <WelcomeSheet visible={welcomeOpen} lang={lang} onStart={closeWelcome} onInvite={inviteFromWelcome} />
     </View>
   );
 }
@@ -3773,4 +4042,105 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: SP.xxl,
   },
+});
+
+// ---- 1.3.0 (9): Hoş geldin kartı, paylaş ipucu, boş ekran ----
+const VIOLET = '#3F3BC9';
+const ws = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: 'rgba(8,14,36,0.55)', justifyContent: 'flex-end' },
+  sheet: {
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: SP.xxl,
+    paddingTop: SP.md,
+    paddingBottom: SP.xxxl + SP.sm,
+  },
+  handle: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: '#D9DBE1', marginBottom: SP.lg },
+  emoji: { fontSize: 44, marginBottom: SP.sm },
+  title: { fontFamily: F.bold, fontSize: 26, lineHeight: 33, color: '#16233F' },
+  titleAccent: { color: VIOLET },
+  body: { fontFamily: F.regular, fontSize: FS.md, lineHeight: 22, color: SOFT, marginTop: SP.md, marginBottom: SP.sm },
+  row: { flexDirection: 'row', alignItems: 'flex-start', gap: SP.md, marginTop: SP.md },
+  rowIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    backgroundColor: '#EEF0FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowEmoji: { fontSize: 15 },
+  rowText: { flex: 1, fontFamily: F.regular, fontSize: FS.md, lineHeight: 21, color: INK, paddingTop: 4 },
+  primary: {
+    marginTop: SP.xxl,
+    backgroundColor: VIOLET,
+    borderRadius: 18,
+    paddingVertical: SP.lg,
+    alignItems: 'center',
+  },
+  primaryText: { fontFamily: F.bold, fontSize: FS.lg, color: '#ffffff' },
+  secondary: {
+    marginTop: SP.sm + 2,
+    backgroundColor: '#EEF0FF',
+    borderRadius: 18,
+    paddingVertical: SP.lg - 2,
+    alignItems: 'center',
+  },
+  secondaryText: { fontFamily: F.bold, fontSize: FS.md, color: VIOLET },
+
+  dim: { flex: 1, backgroundColor: 'rgba(8,14,36,0.62)' },
+  tipArea: {
+    position: 'absolute',
+    top: 0,
+    left: SP.xl,
+    right: SP.xl,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  tip: {
+    alignSelf: 'stretch',
+    backgroundColor: '#17284D',
+    borderRadius: 20,
+    paddingVertical: SP.lg,
+    paddingHorizontal: SP.lg + 2,
+    gap: 6,
+  },
+  tipTitle: { fontFamily: F.bold, fontSize: FS.lg, color: '#ffffff' },
+  tipText: { fontFamily: F.regular, fontSize: FS.base, lineHeight: 20, color: '#C9D3EE' },
+  tipOk: {
+    alignSelf: 'flex-end',
+    marginTop: SP.sm,
+    backgroundColor: '#A5B4FC',
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 18,
+  },
+  tipOkText: { fontFamily: F.bold, fontSize: FS.base, color: '#16233F' },
+  tipArrow: {
+    width: 16,
+    height: 16,
+    backgroundColor: '#17284D',
+    transform: [{ rotate: '45deg' }],
+    marginTop: -9,
+  },
+  ring: {
+    position: 'absolute',
+    padding: 6,
+    borderRadius: SP.lg + 6,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+  },
+
+  momentPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: SP.md,
+    backgroundColor: '#F4F5F8',
+    borderRadius: 999,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+  },
+  momentPillText: { fontFamily: F.regular, fontSize: FS.sm, color: SOFT },
+  momentPillStrong: { fontFamily: F.bold },
 });

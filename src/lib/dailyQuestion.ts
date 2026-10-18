@@ -57,6 +57,23 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_COUNTRY_TOTAL = 30; // ülkede en az bu kadar cevap varsa ülke sonucu, yoksa dünya sonucu
 
+// ---- Değişiklik haberi: cevap verilince / sonuç görülünce alt banttaki nokta yenilensin
+type Listener = () => void;
+const listeners = new Set<Listener>();
+export function onPollsChanged(fn: Listener): () => void {
+  listeners.add(fn);
+  return () => {
+    listeners.delete(fn);
+  };
+}
+function notifyPollsChanged() {
+  listeners.forEach((fn) => {
+    try {
+      fn();
+    } catch {}
+  });
+}
+
 const QUESTION_FIELDS = 'id, day_date, series_day, question_tr, question_en, question_ko, options, theme, art_svg';
 
 // Türkiye saati yıl boyu UTC+3 (yaz saati yok)
@@ -206,6 +223,7 @@ export async function submitAnswer(q: DailyQuestion, optionKey: string, lang: La
     saved = (data as { option_key?: string } | null)?.option_key ?? optionKey;
   }
   await saveLocalAnswer(q.day_date, saved);
+  notifyPollsChanged();
   return saved;
 }
 
@@ -311,6 +329,27 @@ export async function markRevealed(day: string) {
   const list = (await readRevealed()).filter((d) => d !== day);
   list.push(day);
   await AsyncStorage.setItem(REVEALED_KEY, JSON.stringify(list.slice(-60))).catch(() => {});
+  notifyPollsChanged();
+}
+
+// Alt banttaki Anketler sekmesinde sarı nokta görünsün mü?
+// 21:00'den önce: bugünün sorusu cevaplanmadıysa. 21:00'den sonra: cevaplandı ama sonuca bakılmadıysa.
+export async function pollsBadge(lang: Lang): Promise<boolean> {
+  try {
+    if (!pollsVisible(lang)) return false;
+    const day = istanbulToday();
+    const local = await readLocalAnswers();
+    const answered = !!local[day];
+    if (isBeforeResults()) {
+      if (answered) return false;
+      const q = await fetchTodayQuestion();
+      return !!q && !!questionText(q, lang);
+    }
+    if (!answered) return false;
+    return !(await readRevealed()).includes(day);
+  } catch {
+    return false;
+  }
 }
 
 export type PendingReveal = {

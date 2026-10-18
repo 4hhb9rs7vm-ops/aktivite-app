@@ -1,9 +1,11 @@
 // İnce alt menü: Şu An · Arkadaşlar · Anketler · Ben
 // Ekrandan ayrışsın diye: üstte gölge ve çizgi, seçili sekmede simgenin arkasında renkli bir kapsül.
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { Lang } from '@/lib/i18n';
+import { onPollsChanged, pollsBadge } from '@/lib/dailyQuestion';
 
 export type TabId = 'now' | 'friends' | 'polls' | 'me';
 
@@ -46,6 +48,34 @@ export function TabBar({
   if (showFriends) tabs.push('friends');
   if (showPolls) tabs.push('polls');
   tabs.push('me');
+
+  // Anketler sekmesinde sarı nokta: bugünün sorusu bekliyor ya da sonuç açıklandı
+  const [pollsDot, setPollsDot] = useState(false);
+  useEffect(() => {
+    if (!showPolls) {
+      setPollsDot(false);
+      return;
+    }
+    let alive = true;
+    const refresh = () => {
+      pollsBadge(lang)
+        .then((v) => alive && setPollsDot(v))
+        .catch(() => {});
+    };
+    refresh();
+    const offChange = onPollsChanged(refresh);
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') refresh();
+    });
+    const timer = setInterval(refresh, 5 * 60 * 1000); // 21:00 geçişini yakalamak için
+    return () => {
+      alive = false;
+      offChange();
+      sub.remove();
+      clearInterval(timer);
+    };
+  }, [showPolls, lang, active]);
+
   return (
     <View
       style={[styles.bar, { height: TAB_BAR_HEIGHT + bottomInset, paddingBottom: bottomInset }]}
@@ -66,6 +96,7 @@ export function TabBar({
           >
             <View style={[styles.pill, on && styles.pillOn]}>
               <Ionicons name={on ? ICONS[t].on : ICONS[t].off} size={22} color={color} />
+              {t === 'polls' && pollsDot && !on ? <View style={styles.dot} /> : null}
             </View>
             <Text style={[styles.label, { color }, on && styles.labelOn]}>{LABELS[t][lang]}</Text>
           </Pressable>
@@ -96,6 +127,17 @@ const styles = StyleSheet.create({
   item: { flex: 1, maxWidth: 96, alignItems: 'center', gap: 3 },
   pill: { width: 58, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   pillOn: { backgroundColor: ACTIVE_BG },
+  dot: {
+    position: 'absolute',
+    top: 2,
+    right: 14,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#FBBF24',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
   label: { fontFamily: 'DMSans_500Medium', fontSize: 11 },
   labelOn: { fontFamily: 'DMSans_700Bold' },
 });

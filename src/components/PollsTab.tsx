@@ -38,6 +38,7 @@ import {
   themeOf,
 } from '@/lib/dailyQuestion';
 import { DailyResultReveal } from '@/components/DailyResultReveal';
+import { scheduleResultNotification } from '@/lib/notifications';
 
 const NAVY = '#0F2A52';
 const AMBER = '#FBBF24';
@@ -182,6 +183,8 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
       return;
     }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    const savedOption = todayItem.question.options.find((o) => o.key === saved);
+    scheduleResultNotification(todayItem.question.day_date, savedOption ? clubName(savedOption, lang) : null);
     setItems((prev) =>
       prev ? prev.map((i) => (i.question.id === todayItem.question.id ? { ...i, myKey: saved } : i)) : prev
     );

@@ -52,6 +52,7 @@ import {
   submitAnswer,
 } from '@/lib/dailyQuestion';
 import { DailyResultReveal } from '@/components/DailyResultReveal';
+import { scheduleResultNotification } from '@/lib/notifications';
 
 // index.tsx'teki açılış ekranı 3,5 sn sürüyor. Kart, ana ekran kısa bir an göründükten sonra gelsin.
 const SHOW_DELAY_MS = 4300;
@@ -269,6 +270,8 @@ export function DailyQuestionGate() {
       return;
     }
     setPicked(saved); // daha önce başka şık seçildiyse ekranda o görünsün
+    const savedOption = question.options.find((o) => o.key === saved);
+    scheduleResultNotification(question.day_date, savedOption ? clubName(savedOption, lang) : null); // 21:00 bildirimi
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     setStreak(await getStreak()); // telefondaki cevap geçmişinden yeniden say (aynı gün iki kez sayılmaz)
     setPhase('done');

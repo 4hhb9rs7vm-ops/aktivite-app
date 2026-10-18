@@ -1,6 +1,6 @@
-import { Platform } from 'react-native';
-import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
 import { loadLang, NOTIF_TEXT } from '@/lib/i18n';
 
@@ -9,10 +9,11 @@ const CHANNEL_ID = 'gunun-ani';
 const ID_PREFIX = 'gunun-ani-';
 const DAYS_AHEAD = 14; // Uygulama her açıldığında önümüzdeki 14 gün planlanır
 
-// Her kullanıcının kendi yerel saatiyle 11:00-20:00 arası.
+// Her kullanıcının kendi yerel saatiyle 10:00-19:30 arası başlar; 30 dk cevap penceresiyle en geç 20:00'de biter.
+// Böylece 21:00'deki Günün Sorusu sonucuyla arasında en az 1 saat kalır.
 // Aynı saat dilimindeki herkes aynı anda bildirim alır.
-const WINDOW_START_MIN = 11 * 60; // 11:00
-const WINDOW_END_MIN = 20 * 60; // 20:00
+const WINDOW_START_MIN = 10 * 60; // 10:00
+const WINDOW_END_MIN = 19 * 60 + 30; // 19:30 (son başlangıç)
 export const ANSWER_WINDOW_MIN = 30; // Bildirimden sonra cevap penceresi (dakika)
 
 // ---- Bildirim modülü (gerektiğinde yüklenir) ----
@@ -68,7 +69,7 @@ function hashString(s: string): number {
   return h >>> 0;
 }
 
-// Verilen günün "Günün Anı" saati (yerel saatle 11:00-20:00 arası, aynı günde herkeste aynı)
+// Verilen günün "Günün Anı" saati (yerel saatle 10:00-19:30 arası, aynı günde herkeste aynı)
 export function getMomentForDay(day: Date): Date {
   const range = WINDOW_END_MIN - WINDOW_START_MIN;
   const minuteOfDay = WINDOW_START_MIN + (hashString('gunun-ani:' + dateKey(day)) % range);
@@ -150,7 +151,10 @@ export async function setDailyMomentEnabled(on: boolean): Promise<void> {
     await AsyncStorage.setItem(DAILY_MOMENT_KEY, on ? 'yes' : 'no');
   } catch {}
   if (on) await scheduleDailyMoments();
-  else await cancelDailyMoments();
+  else {
+    await cancelDailyMoments();
+    await cancelResultNotifications();
+  }
 }
 
 // Dil değiştiğinde de çağrılır; bildirim metni seçili dilde planlanır
@@ -186,4 +190,66 @@ export async function scheduleDailyMoments(): Promise<void> {
       },
     });
   }
+}
+
+// ---- Günün Sorusu: akşam 21:00 "sonuçlar açıklandı" bildirimi ----
+// Sadece o gün soruyu cevaplayanlara, cevap verdikleri anda telefonda kurulur (sunucu gerekmez).
+// "Günün Anı" ayarı kapalıysa ya da bildirim izni yoksa kurulmaz.
+const RESULT_ID_PREFIX = 'gunun-sorusu-sonuc-';
+
+const RESULT_TEXT = {
+  tr: {
+    title: 'Sonuçlar açıklandı',
+    club: (club: string) => `${club} ne kadar kalabalık? Hemen bak.`,
+    plain: 'Senin gibi cevap veren kaç kişi var? Hemen bak.',
+  },
+  en: {
+    title: 'Results are in',
+    club: (club: string) => `How big is the ${club}? Take a look.`,
+    plain: 'How many people answered like you? Take a look.',
+  },
+};
+
+// day: İstanbul günü 'YYYY-MM-DD'. Bildirim o gün 21:00 İstanbul saatinde (18:00 UTC) gelir.
+export async function scheduleResultNotification(day: string, club: string | null): Promise<void> {
+  try {
+    const Notifications = getNotifications();
+    if (!Notifications) return;
+    if (!(await isDailyMomentEnabled())) return;
+    if (!(await hasNotificationPermission())) return;
+
+    const [y, m, d] = day.split('-').map(Number);
+    const at = new Date(Date.UTC(y, m - 1, d, 18, 0, 0));
+    if (at.getTime() <= Date.now() + 60 * 1000) return; // 21:00 geçtiyse kurma
+
+    await ensureChannel();
+    const lang = await loadLang();
+    const t = (lang as string) === 'tr' ? RESULT_TEXT.tr : RESULT_TEXT.en;
+    const id = RESULT_ID_PREFIX + day;
+    await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
+    await Notifications.scheduleNotificationAsync({
+      identifier: id,
+      content: {
+        title: t.title,
+        body: club ? t.club(club) : t.plain,
+        data: { type: 'gunun-sorusu-sonuc', date: day },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: at,
+        channelId: CHANNEL_ID,
+      },
+    });
+  } catch {}
+}
+
+export async function cancelResultNotifications(): Promise<void> {
+  const Notifications = getNotifications();
+  if (!Notifications) return;
+  const scheduled = await Notifications.getAllScheduledNotificationsAsync().catch(() => []);
+  await Promise.all(
+    scheduled
+      .filter((x) => x.identifier.startsWith(RESULT_ID_PREFIX))
+      .map((x) => Notifications.cancelScheduledNotificationAsync(x.identifier).catch(() => {}))
+  );
 }

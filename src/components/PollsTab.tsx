@@ -23,6 +23,7 @@ import type { Lang } from '@/lib/i18n';
 import {
   clubName,
   dayLabel,
+  fetchCrowd,
   fetchPollHistory,
   getStreak,
   isBeforeResults,
@@ -39,6 +40,8 @@ import {
 } from '@/lib/dailyQuestion';
 import { DailyResultReveal } from '@/components/DailyResultReveal';
 import { scheduleResultNotification } from '@/lib/notifications';
+import { track } from '@/lib/analytics';
+import { checkBadges } from '@/lib/badges';
 
 const NAVY = '#0F2A52';
 const AMBER = '#FBBF24';
@@ -60,6 +63,7 @@ const TEXT = {
     pickHint: "Herkese aynı soru. Sonuç akşam 21:00'de.",
     yours: 'Senin cevabın',
     countdown: (h: number, m: number) => (h > 0 ? `Sonuç ${h} sa ${m} dk sonra` : `Sonuç ${m} dk sonra`),
+    crowd: (n: string) => `Bugün ${n} kişi cevapladı`,
     at21: "Sonuçlar 21:00'de açıklanacak",
     seeResult: 'Sonucu gör',
     waiting: 'Sonuç hesaplanıyor, birazdan burada.',
@@ -83,6 +87,7 @@ const TEXT = {
     pickHint: 'Same question for everyone. Results at 9 pm.',
     yours: 'Your answer',
     countdown: (h: number, m: number) => (h > 0 ? `Results in ${h}h ${m}m` : `Results in ${m}m`),
+    crowd: (n: string) => `${n} people answered today`,
     at21: 'Results drop at 9 pm',
     seeResult: 'See the result',
     waiting: 'Counting votes, check back in a moment.',
@@ -131,6 +136,7 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
   const [streak, setStreak] = useState(0);
   const [sendingKey, setSendingKey] = useState<string | null>(null);
   const [reveal, setReveal] = useState<{ data: PendingReveal; kicker: string } | null>(null);
+  const [crowd, setCrowd] = useState<number | null>(null); // bugün 3.000+ cevap varsa eşik
   const [, setTick] = useState(0); // geri sayım için dakikada bir yeniden çiz
   const mounted = useRef(true);
 
@@ -141,6 +147,8 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
       setItems(list);
       setFailed(false);
       setStreak(await getStreak());
+      const todayQ = list.find((i) => i.question.day_date === istanbulToday());
+      setCrowd(todayQ ? await fetchCrowd(todayQ.question) : null);
     } catch {
       if (mounted.current) setFailed(true);
     }
@@ -148,6 +156,7 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
 
   useEffect(() => {
     mounted.current = true;
+    track('polls_tab_open');
     load();
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'active') load();
@@ -171,6 +180,8 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
   const pastItems = (items ?? []).filter((i) => i.question.day_date !== today);
   const answeredCount = (items ?? []).filter((i) => i.myKey && i.question.series_day).length;
   const before21 = isBeforeResults();
+  // Bugünün kartı varsa lacivert başlığın üstüne biner; yoksa liste başlığın altından düz başlar
+  const overlap = !!todayItem || !items || items.length === 0;
 
   async function pickToday(key: string) {
     if (!todayItem || sendingKey) return;
@@ -183,6 +194,8 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
       return;
     }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    track('question_answered', { day: todayItem.question.day_date, option: saved, source: 'polls' });
+    setTimeout(() => checkBadges().catch(() => {}), 600);
     const savedOption = todayItem.question.options.find((o) => o.key === saved);
     scheduleResultNotification(todayItem.question.day_date, savedOption ? clubName(savedOption, lang) : null);
     setItems((prev) =>
@@ -275,6 +288,14 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
               <Ionicons name="time-outline" size={18} color={AMBER_FG} />
               <Text style={styles.countText}>{tx.countdown(left.h, left.m)}</Text>
             </View>
+            {crowd ? (
+              <View style={styles.crowdRow}>
+                <Ionicons name="people" size={16} color={NAVY} />
+                <Text style={styles.crowdText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                  {tx.crowd(crowd.toLocaleString((lang as string) === 'tr' ? 'tr-TR' : 'en-US'))}
+                </Text>
+              </View>
+            ) : null}
           </View>
         ) : item.myKey ? (
           // 21:00 sonrası, cevaplandı
@@ -360,14 +381,16 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ffffff" />}
       >
-        <View style={[styles.header, { paddingTop: topInset + 18 }]}>
+        <View style={[styles.header, { paddingTop: topInset + 18, paddingBottom: overlap ? 56 : 22 }]}>
           <Text style={styles.subtitle}>{tx.subtitle}</Text>
           <Text style={styles.title}>{tx.title}</Text>
           <View style={styles.statsRow}>
-            <View style={styles.stat}>
-              <Ionicons name="checkmark-circle" size={16} color={AMBER} />
-              <Text style={styles.statText}>{tx.answered(answeredCount)}</Text>
-            </View>
+            {items && items.length > 0 ? (
+              <View style={styles.stat}>
+                <Ionicons name="checkmark-circle" size={16} color={AMBER} />
+                <Text style={styles.statText}>{tx.answered(answeredCount)}</Text>
+              </View>
+            ) : null}
             {streak > 1 ? (
               <View style={styles.stat}>
                 <Ionicons name="flame" size={16} color={AMBER} />
@@ -377,7 +400,7 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
           </View>
         </View>
 
-        <View style={styles.body}>
+        <View style={[styles.body, { marginTop: overlap ? -40 : 0 }]}>
           {items === null && !failed ? (
             <ActivityIndicator style={{ marginTop: 40 }} color={NAVY} />
           ) : failed ? (
@@ -393,7 +416,7 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
               {todayItem ? renderToday(todayItem) : null}
               {pastItems.length > 0 ? (
                 <>
-                  <Text style={styles.sectionTitle}>{tx.past}</Text>
+                  <Text style={[styles.sectionTitle, !todayItem && { marginTop: 18 }]}>{tx.past}</Text>
                   <View style={styles.list}>{pastItems.map(renderPast)}</View>
                 </>
               ) : null}
@@ -403,7 +426,14 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
       </ScrollView>
 
       {reveal ? (
-        <DailyResultReveal data={reveal.data} lang={lang} onClose={onRevealClose} autoReveal kicker={reveal.kicker} />
+        <DailyResultReveal
+          data={reveal.data}
+          lang={lang}
+          onClose={onRevealClose}
+          autoReveal
+          kicker={reveal.kicker}
+          source="polls"
+        />
       ) : null}
     </View>
   );
@@ -577,6 +607,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  crowdRow: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  crowdText: {
+    flexShrink: 1,
+    fontFamily: F.bold,
+    fontSize: 14,
+    color: NAVY,
   },
   countText: {
     fontFamily: F.bold,

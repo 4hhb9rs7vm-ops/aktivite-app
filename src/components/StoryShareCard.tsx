@@ -6,6 +6,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 import type { Lang } from '@/lib/i18n';
 import { DQTheme, THEMES } from '@/lib/dailyQuestion';
+import { BADGE_BY_ID, badgeName, TierId } from '@/lib/badges';
 
 export const STORY_W = 360;
 export const STORY_H = 640;
@@ -19,6 +20,15 @@ type Props = {
   option: string; // 'İkisi de'
   pct: number; // 0-100
   lang: Lang;
+  tier?: TierId | null; // üyelik rozeti varsa kart çerçeveli olur
+};
+
+// Üyeliğe göre çerçeve rengi
+const FRAME: Record<TierId, string> = {
+  tier_7: '#FBBF24', // Daimi Üye: altın çerçeve
+  tier_14: '#C9D1DC', // Gümüş
+  tier_21: '#F5C542', // Altın
+  tier_30: '#FBBF24', // Kurucu
 };
 
 const F = { medium: 'DMSans_500Medium', bold: 'DMSans_700Bold' };
@@ -45,7 +55,7 @@ const TEXT = {
 };
 
 export const StoryShareCard = forwardRef<View, Props>(function StoryShareCard(
-  { theme, artSvg, question, dateLabel, club, option, pct, lang },
+  { theme, artSvg, question, dateLabel, club, option, pct, lang, tier = null },
   ref
 ) {
   const t = THEMES[theme];
@@ -58,7 +68,22 @@ export const StoryShareCard = forwardRef<View, Props>(function StoryShareCard(
   const bigSize = big.length > 18 ? 36 : big.length > 13 ? 42 : 46;
 
   return (
-    <View ref={ref} collapsable={false} style={[styles.card, { backgroundColor: t.bg }]}>
+    <View
+      ref={ref}
+      collapsable={false}
+      style={[
+        styles.card,
+        { backgroundColor: t.bg },
+        tier ? { borderWidth: tier === 'tier_7' ? 7 : 10, borderColor: FRAME[tier] } : null,
+      ]}
+    >
+      {tier ? (
+        <View style={[styles.tierChip, { backgroundColor: FRAME[tier] }]}>
+          <Text style={styles.tierChipText}>
+            {BADGE_BY_ID[tier].emoji} {badgeName(tier, lang)}
+          </Text>
+        </View>
+      ) : null}
       <View style={styles.top}>
         <Text style={[styles.brand, { color: t.fg }]}>ŞU AN</Text>
         <View style={[styles.datePill, { backgroundColor: t.chip }]}>
@@ -105,6 +130,24 @@ export const StoryShareCard = forwardRef<View, Props>(function StoryShareCard(
 });
 
 const styles = StyleSheet.create({
+  tierChip: {
+    position: 'absolute',
+    top: 0,
+    alignSelf: 'center',
+    left: 0,
+    right: 0,
+    marginHorizontal: 110,
+    paddingVertical: 4,
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  tierChipText: {
+    fontFamily: 'DMSans_700Bold',
+    fontSize: 11,
+    color: '#0F2A52',
+  },
   card: {
     width: STORY_W,
     height: STORY_H,

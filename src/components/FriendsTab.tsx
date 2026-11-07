@@ -1,5 +1,7 @@
 // Arkadaşlar sekmesi: ilk açılış (görünen ad + tek kural), arkadaş listesi, QR ile ekleme,
 // sessize alma, arkadaşlıktan çıkarma ve şikayet. Arkadaşlar sadece birbirinin ŞU ANKİ anını görür.
+// 1.5.0: "Sor" düğmesi (şu an bir an seçmemiş arkadaşa "Şu an ne yapıyorsun?" bildirimi) ve
+// listenin altında "Arkadaşlarım bana sorabilsin" ayarı.
 import { ComponentType, ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -11,6 +13,7 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -35,6 +38,7 @@ import {
 } from '@/lib/friends';
 import { checkDisplayName, cleanDisplayName, Me, NAME_MAX, nameError, nameLength } from '@/lib/me';
 import { Avatar, QrSheet } from '@/components/QrSheet';
+import { AskResult, getAllowAsks, recentAsks, sendAsk, setAllowAsks } from '@/lib/ask';
 
 const BG = '#F4F5F7';
 const INK = '#16161A';
@@ -98,6 +102,18 @@ const T = {
     error: 'Bir sorun oluştu',
     errorText: 'Bağlantı kurulamadı. İnternetini kontrol edip tekrar dene.',
     ok: 'Tamam',
+    ask: 'Sor',
+    asked: 'Soruldu',
+    askDone: (n: string) => `Soru gitti. ${n} bir an seçince sana haber vereceğiz.`,
+    askMsg: {
+      cooldown: (_n: string) => 'Az önce sordun. Aynı kişiye 4 saatte bir sorabilirsin.',
+      limit: (n: string) => `${n} bugün yeterince soru aldı. Yarın tekrar dene.`,
+      off: (n: string) => `${n} soru almayı kapatmış.`,
+      quiet: (n: string) => `${n} için şu an gece saati. Sabah 09:00'dan sonra sorabilirsin.`,
+      no_device: (n: string) => `${n} bildirimlerini kapatmış, soru ulaşmıyor.`,
+    } as Record<Exclude<AskResult, 'ok' | 'not_friend' | 'network'>, (n: string) => string>,
+    allowTitle: 'Arkadaşlarım bana sorabilsin',
+    allowSub: '"Şu an ne yapıyorsun?" bildirimi. Bir kişiye günde en fazla 3 soru, gece gelmez.',
   },
   en: {
     title: 'Friends',
@@ -145,6 +161,18 @@ const T = {
     error: 'Something went wrong',
     errorText: "Couldn't connect. Check your internet and try again.",
     ok: 'OK',
+    ask: 'Ask',
+    asked: 'Asked',
+    askDone: (n: string) => `Sent. We'll let you know when ${n} picks a moment.`,
+    askMsg: {
+      cooldown: (_n: string) => 'You just asked. You can ask the same person every 4 hours.',
+      limit: (n: string) => `${n} has had enough questions today. Try again tomorrow.`,
+      off: (n: string) => `${n} has turned off questions.`,
+      quiet: (n: string) => `It's night time for ${n}. You can ask after 9 am.`,
+      no_device: (n: string) => `${n} has notifications off, so the question can't reach them.`,
+    } as Record<Exclude<AskResult, 'ok' | 'not_friend' | 'network'>, (n: string) => string>,
+    allowTitle: 'Let my friends ask me',
+    allowSub: '"What are you doing right now?" notification. At most 3 a day, never at night.',
   },
 };
 
@@ -178,6 +206,10 @@ export function FriendsTab({
   const [qrOpen, setQrOpen] = useState(false);
   const [actionFor, setActionFor] = useState<Friend | null>(null);
   const [reportFor, setReportFor] = useState<Friend | null>(null);
+  // Sor
+  const [asked, setAsked] = useState<Record<string, number>>({});
+  const [askingId, setAskingId] = useState<string | null>(null);
+  const [allowAsks, setAllowAsksState] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -195,6 +227,8 @@ export function FriendsTab({
       setMutes(m);
       setSetup(s);
       if (s) load();
+      recentAsks().then(setAsked).catch(() => {});
+      getAllowAsks().then(setAllowAsksState).catch(() => {});
     })();
   }, [load]);
 
@@ -250,6 +284,37 @@ export function FriendsTab({
         },
       ]);
     }, 300);
+  }
+
+  async function ask(f: Friend) {
+    if (askingId) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    setAskingId(f.id);
+    const r = await sendAsk(f.id);
+    setAskingId(null);
+    if (r === 'ok') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      setAsked((cur) => ({ ...cur, [f.id]: Date.now() }));
+      Alert.alert(t.ask, t.askDone(f.name), [{ text: t.ok }]);
+      return;
+    }
+    if (r === 'cooldown') setAsked((cur) => ({ ...cur, [f.id]: Date.now() }));
+    if (r === 'not_friend' || r === 'network') {
+      showError();
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+    Alert.alert(t.ask, t.askMsg[r](f.name), [{ text: t.ok }]);
+  }
+
+  async function toggleAllowAsks(next: boolean) {
+    Haptics.selectionAsync().catch(() => {});
+    setAllowAsksState(next);
+    const ok = await setAllowAsks(next);
+    if (!ok) {
+      setAllowAsksState(!next);
+      showError();
+    }
   }
 
   async function sendReport(f: Friend, reason: ReportReason) {
@@ -372,11 +437,49 @@ export function FriendsTab({
                   <View style={styles.samePill}>
                     <Text style={styles.sameText}>{t.same}</Text>
                   </View>
+                ) : !f.activityId && !f.moodHidden ? (
+                  asked[f.id] ? (
+                    <View style={styles.askedPill}>
+                      <Ionicons name="checkmark" size={14} color={MUTED} />
+                      <Text style={styles.askedText}>{t.asked}</Text>
+                    </View>
+                  ) : (
+                    <Pressable
+                      style={({ pressed }) => [styles.askBtn, pressed && { opacity: 0.85 }]}
+                      onPress={() => ask(f)}
+                      disabled={!!askingId}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${t.ask}: ${f.name}`}
+                    >
+                      {askingId === f.id ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.askText}>{t.ask} 👀</Text>
+                      )}
+                    </Pressable>
+                  )
                 ) : null}
               </Pressable>
             );
           })
         )}
+
+        {friends && list.length > 0 ? (
+          <View style={styles.allowCard}>
+            <View style={{ flex: 1, gap: 3 }}>
+              <Text style={styles.cardTitle}>{t.allowTitle}</Text>
+              <Text style={styles.cardSub}>{t.allowSub}</Text>
+            </View>
+            <Switch
+              value={allowAsks}
+              onValueChange={toggleAllowAsks}
+              trackColor={{ false: '#D9DBE1', true: ACCENT }}
+              thumbColor="#FFFFFF"
+              ios_backgroundColor="#D9DBE1"
+            />
+          </View>
+        ) : null}
       </ScrollView>
       <View style={[styles.statusShade, { height: topInset }]} pointerEvents="none" />
 
@@ -735,6 +838,35 @@ const styles = StyleSheet.create({
   statusMuted: { fontFamily: F.regular, fontSize: 13, color: MUTED },
   samePill: { backgroundColor: '#E6ECFF', paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999 },
   sameText: { fontFamily: F.bold, fontSize: 12, color: ACCENT },
+  askBtn: {
+    backgroundColor: ACCENT,
+    minWidth: 72,
+    height: 36,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  askText: { fontFamily: F.bold, fontSize: 14, color: '#FFFFFF' },
+  askedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F0F1F4',
+    height: 32,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+  },
+  askedText: { fontFamily: F.bold, fontSize: 13, color: MUTED },
+  allowCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 6,
+  },
 
   card: { backgroundColor: '#FFFFFF', borderRadius: 22, padding: 18, gap: 8 },
   cardTitle: { fontFamily: F.bold, fontSize: 15, color: INK },

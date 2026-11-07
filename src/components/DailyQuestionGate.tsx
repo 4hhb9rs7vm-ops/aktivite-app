@@ -53,6 +53,8 @@ import {
 } from '@/lib/dailyQuestion';
 import { DailyResultReveal } from '@/components/DailyResultReveal';
 import { scheduleResultNotification } from '@/lib/notifications';
+import { track } from '@/lib/analytics';
+import { checkBadges } from '@/lib/badges';
 
 // index.tsx'teki açılış ekranı 3,5 sn sürüyor. Kart, ana ekran kısa bir an göründükten sonra gelsin.
 const SHOW_DELAY_MS = 4300;
@@ -123,6 +125,7 @@ export function DailyQuestionGate() {
   const [reveal, setReveal] = useState<PendingReveal | null>(null);
 
   const checking = useRef(false);
+  const answeredNow = useRef(false); // bu kartta cevap verildi mi (kapanınca rozet kontrolü için)
   const visibleRef = useRef(false);
   const backdrop = useRef(new Animated.Value(0)).current; // arka plan karartması
   const slide = useRef(new Animated.Value(SCREEN_H)).current; // kartın alttan gelişi
@@ -164,6 +167,7 @@ export function DailyQuestionGate() {
     setPicked(null);
     setPhase('question');
     open();
+    track('question_shown', { day: q.day_date, source: 'gate' });
   }
 
   // Sonuç ekranı kapandı. Paylaş denildiyse modal tamamen kapandıktan sonra paylaşma penceresi,
@@ -244,6 +248,11 @@ export function DailyQuestionGate() {
     ]).start(() => {
       visibleRef.current = false;
       setVisible(false);
+      // Cevap verildiyse kart kapandıktan sonra rozet kontrolü (ör. 7 gün → Daimi Üye kutlaması)
+      if (answeredNow.current) {
+        answeredNow.current = false;
+        setTimeout(() => checkBadges().catch(() => {}), 300);
+      }
     });
   }
 
@@ -270,6 +279,8 @@ export function DailyQuestionGate() {
       return;
     }
     setPicked(saved); // daha önce başka şık seçildiyse ekranda o görünsün
+    track('question_answered', { day: question.day_date, option: saved, source: 'gate' });
+    answeredNow.current = true;
     const savedOption = question.options.find((o) => o.key === saved);
     scheduleResultNotification(question.day_date, savedOption ? clubName(savedOption, lang) : null); // 21:00 bildirimi
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -282,12 +293,14 @@ export function DailyQuestionGate() {
   async function onSkip() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     await skipToday();
+    if (question) track('question_skipped', { day: question.day_date });
     close();
   }
 
   async function onSnooze() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     await snoozeWeek();
+    if (question) track('question_snoozed', { day: question.day_date });
     close();
   }
 
@@ -299,7 +312,7 @@ export function DailyQuestionGate() {
   }
 
   if (reveal) {
-    return <DailyResultReveal data={reveal} lang={lang} onClose={onRevealClose} />;
+    return <DailyResultReveal data={reveal} lang={lang} onClose={onRevealClose} source="gate" />;
   }
 
   if (!visible || !question) return null;

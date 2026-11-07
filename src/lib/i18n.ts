@@ -45,6 +45,8 @@ const ACTIVITY_NAMES: Record<string, { tr: string; en: string }> = {
   friends: { tr: 'Arkadaşlarımla birlikteyim', en: 'With friends' },
   scrolling: { tr: 'Telefonda geziniyorum', en: 'On my phone' },
   resting: { tr: 'Dinleniyorum', en: 'Resting' },
+  walk: { tr: 'Yürüyüş yapıyorum', en: 'Out for a walk' },
+  vacation: { tr: 'Tatildeyim', en: 'On vacation' },
   happy: { tr: 'Neşeliyim', en: 'Happy' },
   calm: { tr: 'Huzurluyum', en: 'At peace' },
   hurt: { tr: 'Kırgınım', en: 'Hurt' },

@@ -256,6 +256,25 @@ export async function fetchResults(q: DailyQuestion): Promise<DQResult | null> {
   return pickResult(q, data as ResultRow[]);
 }
 
+// Gün içinde "kalabalık" bilgisi: 3.000'in altındaysa null (hiç gösterilmez), üstündeyse net adet.
+export async function fetchCrowd(q: DailyQuestion): Promise<number | null> {
+  try {
+    if (!(await ensureSession())) return null;
+    const { data, error } = await supabase.rpc('daily_crowd', { p_question_id: q.id });
+    if (error || data === null || data === undefined) return null;
+    const n = Number(data);
+    return n >= CROWD_MIN ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+// Sonuç ekranında toplam kişi sayısı da sadece bu eşiği geçince (net adet) gösterilir
+export const CROWD_MIN = 3000;
+export function crowdShown(total: number): number | null {
+  return total >= CROWD_MIN ? total : null;
+}
+
 // ---------------------------------------------------------------- Anketler sekmesi
 export const SERIES_START = '2026-11-01';
 

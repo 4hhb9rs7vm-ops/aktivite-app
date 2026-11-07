@@ -126,6 +126,18 @@ export const STORY_TEXTS: Record<string, StoryText> = {
     tr: { ben: "Şu an dinleniyorum.", q: "kimler dinleniyor?", team: "Mola ekibi", s: ["Bugün herkes şarj oluyor.", "Molada yalnız değilim.", "Herkes koşturuyor, ben dinleniyorum.", "Mola veren başka kim var?"] },
     en: { ben: "Right now I'm resting.", q: "Who's resting", team: "Team Recharge", s: ["Everyone's recharging today.", "Not alone on my break.", "Everyone rushes, I rest.", "Who else is taking a break?"] },
   },
+  walk: {
+    emoji: "🚶",
+    color: 'seafoam',
+    tr: { ben: "Şu an yürüyüş yapıyorum.", q: "kimler yürüyüşte?", team: "Adım ekibi", s: ["Bugün herkes adım sayıyor.", "Yürüyüşte yalnız değilim.", "Herkes oturuyor, ben adım atıyorum.", "Yürüyüş arkadaşım var mı?"] },
+    en: { ben: "Right now I'm out for a walk.", q: "Who's out for a walk", team: "Team Steps", s: ["Everyone's counting steps today.", "Not walking alone.", "Everyone's sitting, I'm walking.", "Any walking buddies?"] },
+  },
+  vacation: {
+    emoji: "🏖️",
+    color: 'cyan',
+    tr: { ben: "Şu an tatildeyim.", q: "kimler tatilde?", team: "Tatil ekibi", s: ["Bugün herkes tatilde, mesai kimde?", "Tatilde yalnız değilim.", "Herkes işte, ben tatildeyim.", "Tatilde başka kim var?"] },
+    en: { ben: "Right now I'm on vacation.", q: "Who's on vacation", team: "Team Vacation", s: ["Everyone's on vacation. Who's working?", "Not alone on vacation.", "Everyone's working, I'm on vacation.", "Who else is on vacation?"] },
+  },
   happy: {
     emoji: "😄",
     color: 'sunset',

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "153523981809",
+    "project_id": "su-an-8883c",
+    "storage_bucket": "su-an-8883c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:153523981809:android:1f0092d671e2ad9ae30850",
+        "android_client_info": {
+          "package_name": "com.tvfk.aktiviteapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDFhCWYPgDQRvGJFVfD-vLW43XDnjM6tiA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

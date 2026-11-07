@@ -1,33 +1,78 @@
-// İnce alt menü: Şu An · Arkadaşlar · Anketler · Ben
-// Ekrandan ayrışsın diye: üstte gölge ve çizgi, seçili sekmede simgenin arkasında renkli bir kapsül.
-import { useEffect, useState } from 'react';
-import { AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+// İnce alt menü: Şu An · Anketler · Rozetler · Arkadaşlar · Ben
+// Her sekmenin kendi rengi var (uygulamanın paletinden): boşta renkli çizgi simge,
+// seçilince dolu simge + aynı rengin açık tonunda kapsül. Dokununca simge hafifçe zıplar.
+import { useEffect, useRef, useState } from 'react';
+import { Animated, AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { Lang } from '@/lib/i18n';
 import { onPollsChanged, pollsBadge } from '@/lib/dailyQuestion';
 
-export type TabId = 'now' | 'friends' | 'polls' | 'me';
+export type TabId = 'now' | 'friends' | 'polls' | 'badges' | 'me';
 
 export const TAB_BAR_HEIGHT = 64;
 
-const ACTIVE = '#3F3BC9';
-const ACTIVE_BG = '#E6ECFF';
-const IDLE = '#6B6F7B';
+const IDLE_LABEL = '#6B6F7B';
 
 const LABELS: Record<TabId, { tr: string; en: string }> = {
   now: { tr: 'Şu An', en: 'Now' },
-  friends: { tr: 'Arkadaşlar', en: 'Friends' },
   polls: { tr: 'Anketler', en: 'Polls' },
+  badges: { tr: 'Rozetler', en: 'Badges' },
+  friends: { tr: 'Arkadaşlar', en: 'Friends' },
   me: { tr: 'Ben', en: 'Me' },
 };
 
-const ICONS: Record<TabId, { on: keyof typeof Ionicons.glyphMap; off: keyof typeof Ionicons.glyphMap }> = {
-  now: { on: 'home', off: 'home-outline' },
-  friends: { on: 'people', off: 'people-outline' },
-  polls: { on: 'chatbubbles', off: 'chatbubbles-outline' },
-  me: { on: 'person', off: 'person-outline' },
+// color: simge ve yazı rengi, bg: seçiliyken kapsül rengi
+const STYLE: Record<
+  TabId,
+  { on: keyof typeof Ionicons.glyphMap; off: keyof typeof Ionicons.glyphMap; color: string; bg: string }
+> = {
+  now: { on: 'flash', off: 'flash-outline', color: '#4F46E5', bg: '#E6E9FF' }, // marka moru
+  polls: { on: 'chatbubbles', off: 'chatbubbles-outline', color: '#D97706', bg: '#FFF1D6' }, // anket sarısı
+  badges: { on: 'ribbon', off: 'ribbon-outline', color: '#DB2777', bg: '#FCE7F3' }, // rozet pembesi
+  friends: { on: 'people', off: 'people-outline', color: '#0E9F6E', bg: '#DDF5EA' }, // yeşil
+  me: { on: 'person-circle', off: 'person-circle-outline', color: '#0F2A52', bg: '#E4EAF3' }, // lacivert
 };
+
+function TabItem({
+  id,
+  on,
+  label,
+  dot,
+  onPress,
+}: {
+  id: TabId;
+  on: boolean;
+  label: string;
+  dot: boolean;
+  onPress: () => void;
+}) {
+  const s = STYLE[id];
+  const scale = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (!on) return;
+    scale.setValue(0.85);
+    Animated.spring(scale, { toValue: 1, speed: 18, bounciness: 12, useNativeDriver: true }).start();
+  }, [on]);
+
+  return (
+    <Pressable
+      style={styles.item}
+      onPress={onPress}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: on }}
+      accessibilityLabel={label}
+      hitSlop={6}
+    >
+      <Animated.View style={[styles.pill, on && { backgroundColor: s.bg }, { transform: [{ scale }] }]}>
+        <Ionicons name={on ? s.on : s.off} size={23} color={s.color} />
+        {dot ? <View style={styles.dot} /> : null}
+      </Animated.View>
+      <Text style={[styles.label, { color: on ? s.color : IDLE_LABEL }, on && styles.labelOn]}>{label}</Text>
+    </Pressable>
+  );
+}
 
 export function TabBar({
   active,
@@ -35,6 +80,7 @@ export function TabBar({
   lang,
   showFriends,
   showPolls = false,
+  showBadges = false,
   bottomInset,
 }: {
   active: TabId;
@@ -42,11 +88,14 @@ export function TabBar({
   lang: Lang;
   showFriends: boolean;
   showPolls?: boolean; // Anketler sekmesi (seri başlayınca ve çevirisi olan dillerde)
+  showBadges?: boolean; // Rozetler sekmesi (Anketler ile aynı kural)
   bottomInset: number;
 }) {
+  // Sıra: Şu An · Anketler · Rozetler · Arkadaşlar · Ben (Arkadaşlar ve Ben yan yana)
   const tabs: TabId[] = ['now'];
-  if (showFriends) tabs.push('friends');
   if (showPolls) tabs.push('polls');
+  if (showBadges) tabs.push('badges');
+  if (showFriends) tabs.push('friends');
   tabs.push('me');
 
   // Anketler sekmesinde sarı nokta: bugünün sorusu bekliyor ya da sonuç açıklandı
@@ -81,27 +130,16 @@ export function TabBar({
       style={[styles.bar, { height: TAB_BAR_HEIGHT + bottomInset, paddingBottom: bottomInset }]}
       accessibilityRole="tablist"
     >
-      {tabs.map((t) => {
-        const on = t === active;
-        const color = on ? ACTIVE : IDLE;
-        return (
-          <Pressable
-            key={t}
-            style={styles.item}
-            onPress={() => onChange(t)}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: on }}
-            accessibilityLabel={LABELS[t][lang]}
-            hitSlop={6}
-          >
-            <View style={[styles.pill, on && styles.pillOn]}>
-              <Ionicons name={on ? ICONS[t].on : ICONS[t].off} size={22} color={color} />
-              {t === 'polls' && pollsDot && !on ? <View style={styles.dot} /> : null}
-            </View>
-            <Text style={[styles.label, { color }, on && styles.labelOn]}>{LABELS[t][lang]}</Text>
-          </Pressable>
-        );
-      })}
+      {tabs.map((t) => (
+        <TabItem
+          key={t}
+          id={t}
+          on={t === active}
+          label={LABELS[t][lang]}
+          dot={t === 'polls' && pollsDot && t !== active}
+          onPress={() => onChange(t)}
+        />
+      ))}
     </View>
   );
 }
@@ -125,19 +163,18 @@ const styles = StyleSheet.create({
     }),
   },
   item: { flex: 1, maxWidth: 96, alignItems: 'center', gap: 3 },
-  pill: { width: 58, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  pillOn: { backgroundColor: ACTIVE_BG },
+  pill: { width: 54, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   dot: {
     position: 'absolute',
-    top: 2,
-    right: 14,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    top: 1,
+    right: 12,
+    width: 11,
+    height: 11,
+    borderRadius: 6,
     backgroundColor: '#FBBF24',
     borderWidth: 2,
     borderColor: '#FFFFFF',
   },
-  label: { fontFamily: 'DMSans_500Medium', fontSize: 11 },
+  label: { fontFamily: 'DMSans_500Medium', fontSize: 10.5 },
   labelOn: { fontFamily: 'DMSans_700Bold' },
 });

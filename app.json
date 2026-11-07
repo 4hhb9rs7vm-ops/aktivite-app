@@ -2,7 +2,7 @@
   "expo": {
     "name": "Şu An",
     "slug": "aktivite-app",
-    "version": "1.3.0",
+    "version": "1.5.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "aktiviteapp",
@@ -22,7 +22,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.tvfk.aktiviteapp"
+      "package": "com.tvfk.aktiviteapp",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "output": "static",

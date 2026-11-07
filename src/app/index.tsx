@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  AppState,
   BackHandler,
   Easing,
   Linking,
@@ -26,6 +27,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Circle, Defs, LinearGradient, Path, RadialGradient, Rect, Stop, Svg } from 'react-native-svg';
 import {
+  Airplane,
   Armchair,
   Barbell,
   Bed,
@@ -49,6 +51,7 @@ import {
   Hourglass,
   Leaf,
   MapPin,
+  PersonSimpleWalk,
   ShoppingCart,
   Smiley,
   SmileyAngry,
@@ -107,7 +110,13 @@ import { TAB_BAR_HEIGHT, TabBar, TabId } from '@/components/TabBar';
 import { MeTab } from '@/components/MeTab';
 import { ActivityInfo, FriendsTab } from '@/components/FriendsTab';
 import { PollsTab } from '@/components/PollsTab';
-import { pollsVisible } from '@/lib/dailyQuestion';
+import { istanbulToday, pollsVisible } from '@/lib/dailyQuestion';
+import { track } from '@/lib/analytics';
+import { BadgesTab } from '@/components/BadgesTab';
+import { SelamCard } from '@/components/SelamCard';
+import { checkBadges } from '@/lib/badges';
+import { fetchLatestSelamSummary, onSelamChanged, SelamSummary } from '@/lib/selam';
+import { answerAsks, onOpenTab } from '@/lib/ask';
 import {
   deleteFriendData,
   FRIEND_MUTES_KEY,
@@ -126,7 +135,7 @@ function isNight(d = new Date()) {
   return h >= 23 || h < 5;
 }
 const INSTA_HANDLE = '@suan.app';
-const SPLASH_MS = 3500;
+const SPLASH_MS = 2200; // açılış animasyonu (önceden 3500)
 // Davet bağlantısı: telefonu tanıyıp App Store'a ya da Google Play'e yönlendiren sayfa
 const INVITE_URL = 'https://4hhb9rs7vm-ops.github.io/aktivite-app/indir/';
 const FRIENDS_TIP_KEY = 'friends_tip_seen_v1';
@@ -362,6 +371,8 @@ const ACTIVITIES: Activity[] = [
   { id: 'friends', name: 'Arkadaşlarımla birlikteyim', icon: UsersThree, ...PALETTE.rose, world: 4.5, country: 2, peaks: [{ hour: 20, spread: 4 }] },
   { id: 'scrolling', name: 'Telefonda geziniyorum', icon: DeviceMobile, ...PALETTE.rose, world: 10, country: 8, peaks: [{ hour: 22, spread: 3 }] },
   { id: 'resting', name: 'Dinleniyorum', icon: Leaf, ...PALETTE.teal, world: 8, country: 6, peaks: [{ hour: 14, spread: 5 }] },
+  { id: 'walk', name: 'Yürüyüş yapıyorum', icon: PersonSimpleWalk, ...PALETTE.teal, world: 3, country: 3, peaks: [{ hour: 8, spread: 2 }, { hour: 19, spread: 2.5 }] },
+  { id: 'vacation', name: 'Tatildeyim', icon: Airplane, ...PALETTE.amber, world: 2, country: 2, peaks: [{ hour: 13, spread: 6 }] },
   { id: 'happy', name: 'Neşeliyim', icon: Smiley, ...PALETTE.indigo, world: 8, country: 7, peaks: [{ hour: 20, spread: 5 }], mood: true },
   { id: 'calm', name: 'Huzurluyum', icon: FlowerLotus, ...PALETTE.indigo, world: 6, country: 5, peaks: [{ hour: 10, spread: 5 }], mood: true },
   { id: 'hurt', name: 'Kırgınım', icon: HeartBreak, ...PALETTE.indigo, world: 4, country: 4, peaks: [{ hour: 22, spread: 4 }], mood: true },
@@ -861,7 +872,7 @@ function InstaBadge({ size = 22 }: { size?: number }) {
 function Splash({ tx }: { tx: Strings }) {
   const fade = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    Animated.timing(fade, { toValue: 1, duration: DUR, delay: 1300, easing: EASE, useNativeDriver: true }).start();
+    Animated.timing(fade, { toValue: 1, duration: DUR, delay: 800, easing: EASE, useNativeDriver: true }).start();
   }, []);
   return (
     <SafeAreaView style={styles.splashSafe}>
@@ -1963,6 +1974,24 @@ export default function HomeScreen() {
   const [lockAlertFor, setLockAlertFor] = useState<number | null>(null);
   // Ben → Ayarlar: Günün Anı bildirimi açık mı
   const [dailyMomentOn, setDailyMomentOn] = useState(true);
+  // Akşam 21:00'den sonra "Bugün X selam aldın" rozeti (5 ve üstü)
+  const [selamSummary, setSelamSummary] = useState<SelamSummary | null>(null);
+  useEffect(() => {
+    const refresh = () => {
+      fetchLatestSelamSummary()
+        .then(setSelamSummary)
+        .catch(() => {});
+    };
+    refresh();
+    const off = onSelamChanged(refresh);
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'active') refresh();
+    });
+    return () => {
+      off();
+      sub.remove();
+    };
+  }, []);
   const [carry, setCarry] = useState<number | null>(null);
   const [topNow, setTopNow] = useState<{ id: string; pct: number } | null>(null);
   const [pendingShare, setPendingShare] = useState(false);
@@ -2306,6 +2335,14 @@ export default function HomeScreen() {
     Share.share({ message }).catch(() => {});
   }
 
+  // Sor bildirimine dokunulunca: soru → Şu An sekmesi (aktivite seç), cevap → Arkadaşlar sekmesi
+  useEffect(() => {
+    return onOpenTab((target) => {
+      if (target === 'friends' && !FRIENDS_TAB_ENABLED) return;
+      setTab(target);
+    });
+  }, []);
+
   // Arkadaşlar özelliği kurulmuş mu? (sekme değiştikçe tazelenir)
   useEffect(() => {
     isFriendsSetup().then(setFriendsSetup).catch(() => {});
@@ -2441,6 +2478,9 @@ export default function HomeScreen() {
     setGuess(null);
     setGuessing(true);
     pushPresence(a.id, fullProfile, consent).then(() => setRefreshKey((k) => k + 1));
+    track('activity_pick', { id: a.id, moment: getTodayMoment().isOpen, first_today: firstToday, correction: graceUsed });
+    setTimeout(() => checkBadges().catch(() => {}), 2500); // Erkenci / Gece kuşu rozetleri
+    answerAsks().catch(() => {}); // Bana "Sor" diyen arkadaşlara "cevap verdi" bildirimi
     shouldAskNotifications().then((ask) => {
       if (!ask) return;
       if (notifTimer.current) clearTimeout(notifTimer.current);
@@ -2644,6 +2684,7 @@ export default function HomeScreen() {
       const available = await Sharing.isAvailableAsync();
       if (available) {
         await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', UTI: 'public.jpeg', dialogTitle: tx.shareDialog });
+        track('activity_share', { id: selected?.id ?? null });
       } else {
         Alert.alert(tx.shareUnavailableTitle, tx.shareUnavailableText);
       }
@@ -2994,6 +3035,11 @@ export default function HomeScreen() {
             </ScrollView>
           )}
 
+          {/* Selam: kaydırma alanının dışında, her ekran boyunda görünür kalsın */}
+          {!picking && (resultShown || noData) && !ratioError ? (
+            <SelamCard activityId={selected.id} fg={fg} bg={bg} lang={lang} />
+          ) : null}
+
           <View style={styles.timerBox}>
             <View style={styles.timerLabels}>
               <Text style={styles.timerText}>
@@ -3126,6 +3172,7 @@ export default function HomeScreen() {
       lang={lang}
       showFriends={FRIENDS_TAB_ENABLED}
       showPolls={pollsVisible(lang)}
+      showBadges={pollsVisible(lang)}
       bottomInset={insets.bottom}
     />
   );
@@ -3155,6 +3202,20 @@ export default function HomeScreen() {
           privacyUrl={PRIVACY_URLS[lang]}
           topInset={insets.top}
           bottomSpace={tabBottomSpace}
+        />
+        {tabBar}
+      </View>
+    );
+  }
+
+  if (tab === 'badges' && pollsVisible(lang)) {
+    return (
+      <View style={styles.homeRoot}>
+        <BadgesTab
+          lang={lang}
+          topInset={insets.top}
+          bottomSpace={tabBottomSpace}
+          onOpenPolls={() => switchTab('polls')}
         />
         {tabBar}
       </View>
@@ -3252,6 +3313,20 @@ export default function HomeScreen() {
                         ? `${streak.count} günlük seri`
                         : `${streak.count}-day streak`}
                     {!streak.doneToday ? (lang === 'tr' ? ' · bugün devam et' : ' · keep it today') : ''}
+                  </Text>
+                </View>
+              ) : null}
+              {selamSummary ? (
+                <View style={[styles.momentChip, { marginTop: 0, backgroundColor: '#FBBF24' }]}>
+                  <Text style={[styles.momentText, { color: '#0F2A52' }]}>
+                    👋{' '}
+                    {selamSummary.day === istanbulToday()
+                      ? lang === 'tr'
+                        ? `Bugün ${selamSummary.total.toLocaleString('tr-TR')} selam aldın`
+                        : `${selamSummary.total.toLocaleString('en-US')} hellos today`
+                      : lang === 'tr'
+                        ? `Dün ${selamSummary.total.toLocaleString('tr-TR')} selam aldın`
+                        : `${selamSummary.total.toLocaleString('en-US')} hellos yesterday`}
                   </Text>
                 </View>
               ) : null}

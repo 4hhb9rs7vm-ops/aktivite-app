@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Şu An'a davet edildin</title>
+<meta name="description" content="Arkadaşın seni Şu An'a davet ediyor. Ne yaptığını gör, sen de ona sor.">
+<meta property="og:title" content="Şu An'a davet edildin 👀">
+<meta property="og:description" content="Arkadaşın ne yapıyor, sormadan gör. Davet kodunu uygulamaya yaz, hemen eşleşin.">
+<meta property="og:image" content="https://4hhb9rs7vm-ops.github.io/aktivite-app/d/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    min-height: 100vh; color: #fff;
+    background: radial-gradient(circle at 70% 30%, #2B2A7A 0%, #151638 50%, #0B0E22 100%) fixed;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex; align-items: center; justify-content: center; padding: 28px 16px;
+  }
+  .wrap { width: 100%; max-width: 400px; }
+  .brand { font-weight: 800; letter-spacing: 2px; font-size: 14px; color: #A5B4FC; }
+  h1 { margin-top: 18px; font-size: 38px; line-height: 1.05; font-weight: 900; letter-spacing: -1px; }
+  h1 .band { display: inline-block; background: #4F46E5; padding: 0 10px 4px; border-radius: 8px; transform: rotate(-2deg); margin-top: 6px; }
+  .lead { margin-top: 14px; font-size: 16px; line-height: 1.5; color: #C7D2FE; }
+  .codebox { margin-top: 26px; background: rgba(255,255,255,.07); border: 2px solid rgba(165,180,252,.3); border-radius: 20px; padding: 18px; text-align: center; }
+  .codebox small { display: block; font-size: 13px; font-weight: 700; letter-spacing: 1px; color: #A5B4FC; }
+  .code { margin-top: 6px; font-size: 56px; font-weight: 900; letter-spacing: 10px; }
+  .copy { margin-top: 10px; background: none; border: 1.5px solid rgba(255,255,255,.35); color: #fff; font-weight: 700; font-size: 14px; padding: 8px 16px; border-radius: 999px; cursor: pointer; }
+  .btns { margin-top: 22px; display: grid; gap: 12px; }
+  a.btn { display: block; text-align: center; padding: 17px; border-radius: 16px; font-weight: 800; font-size: 17px; text-decoration: none; }
+  .open { background: #fff; color: #4F46E5; }
+  .store { background: rgba(255,255,255,.1); color: #fff; }
+  .note { margin-top: 18px; font-size: 14px; line-height: 1.5; color: #C7D2FE; background: rgba(79,70,229,.18); border-radius: 14px; padding: 12px 14px; }
+  .hint { display: none; margin-top: 10px; font-size: 14px; color: #FBCFE8; text-align: center; }
+  .safe { margin-top: 22px; font-size: 12.5px; line-height: 1.5; color: rgba(255,255,255,.55); text-align: center; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">ŞU AN</div>
+    <h1><span id="who">Arkadaşın</span> seni<br><span class="band">Şu An'a</span><br>davet ediyor 👀</h1>
+    <p class="lead">Ne yaptığını gör, sen de ona sor. Mesajlaşma yok, sadece "şu an".</p>
+
+    <div class="codebox" id="codebox">
+      <small>DAVET KODU</small>
+      <div class="code" id="code">····</div>
+      <button class="copy" id="copy" type="button">Kodu kopyala</button>
+    </div>
+
+    <div class="btns">
+      <a class="btn open" id="open" href="#">Uygulamada aç</a>
+      <a class="btn store" id="ios" href="https://apps.apple.com/app/id6817275887">App Store'dan indir</a>
+      <a class="btn store" id="android" href="https://play.google.com/store/apps/details?id=com.tvfk.aktiviteapp">Google Play'den indir</a>
+    </div>
+    <p class="hint" id="hint">Uygulama açılmadıysa önce indir, sonra bu linke tekrar dokun.</p>
+
+    <p class="note">📲 Uygulamayı yükledikten sonra <b>bu linke tekrar dokun</b> ya da kodu <b>Arkadaşlar → Davet kodum var</b> kısmına yaz.</p>
+    <p class="safe">Arkadaşın onaylamadan eşleşme olmaz. Uygulama ücretsiz, üyelik yok.</p>
+  </div>
+
+<script>
+  (function () {
+    var p = new URLSearchParams(location.search);
+    var code = (p.get('c') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+    var name = (p.get('n') || '').replace(/[<>]/g, '').trim().slice(0, 24);
+
+    if (name) document.getElementById('who').textContent = name;
+    if (code) {
+      document.getElementById('code').textContent = code;
+    } else {
+      document.getElementById('codebox').classList.add('hidden');
+    }
+
+    var appLink = 'aktiviteapp://davet' + (code ? '?c=' + code : '');
+    var open = document.getElementById('open');
+    open.href = appLink;
+    open.addEventListener('click', function () {
+      setTimeout(function () {
+        if (!document.hidden) document.getElementById('hint').style.display = 'block';
+      }, 1600);
+    });
+
+    var ua = navigator.userAgent || '';
+    var isIOS = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var isAndroid = /Android/i.test(ua);
+    if (isIOS) document.getElementById('android').classList.add('hidden');
+    if (isAndroid) document.getElementById('ios').classList.add('hidden');
+
+    document.getElementById('copy').addEventListener('click', function () {
+      var b = this;
+      var done = function () { b.textContent = 'Kopyalandı ✓'; };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(code).then(done, done);
+      } else {
+        var t = document.createElement('textarea'); t.value = code; document.body.appendChild(t);
+        t.select(); try { document.execCommand('copy'); } catch (e) {} document.body.removeChild(t); done();
+      }
+    });
+  })();
+</script>
+</body>
+</html>

@@ -289,3 +289,34 @@ export async function takeNewFriends(ids: string[]): Promise<string[]> {
   if (fresh.length) await markFriendsSeen(fresh);
   return fresh;
 }
+
+// ---- "Daha sonra" denen davet ----
+// Linki açan kişi karar vermezse davet telefonda 24 saat saklanır; Arkadaşlar sekmesinin üstünde
+// "Bekleyen davet" olarak görünür, oradan kabul edebilir ya da silebilir.
+const LATER_KEY = 'invite_later_v1';
+const LATER_TTL_MS = 24 * 3600 * 1000;
+export type LaterInvite = { code: string; name: string; savedAt: number };
+
+export async function saveLaterInvite(code: string, name: string): Promise<void> {
+  const v: LaterInvite = { code: cleanCode(code), name: (name || '').slice(0, 24), savedAt: Date.now() };
+  await AsyncStorage.setItem(LATER_KEY, JSON.stringify(v)).catch(() => {});
+}
+
+export async function getLaterInvite(): Promise<LaterInvite | null> {
+  try {
+    const raw = await AsyncStorage.getItem(LATER_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as LaterInvite;
+    if (!v || !isValidCode(v.code) || Date.now() - v.savedAt > LATER_TTL_MS) {
+      await AsyncStorage.removeItem(LATER_KEY).catch(() => {});
+      return null;
+    }
+    return v;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearLaterInvite(): Promise<void> {
+  await AsyncStorage.removeItem(LATER_KEY).catch(() => {});
+}

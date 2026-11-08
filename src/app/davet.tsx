@@ -1,6 +1,7 @@
 // Davet linki: aktiviteapp://davet?c=K472&n=Kaan
 // Web'deki davet sayfasındaki "Uygulamada aç" butonu buraya gelir.
-// Daveti bu ekranda gösterir: "Kaan seni arkadaş olarak eklemek istiyor" → Kabul et / Reddet.
+// Daveti bu ekranda gösterir: "Kaan seni arkadaş olarak eklemek istiyor" → Kabul et / Daha sonra / Reddet.
+// "Daha sonra" (ya da ✕) davet 24 saat telefonda saklanır, Arkadaşlar sekmesinin üstünde görünür.
 // (Eskiden Arkadaşlar sekmesine geçip orada panel açıyorduk; iPhone ekran geçişi sırasında açılan paneli göstermiyordu.)
 // Kabul edince ikisi hemen arkadaş olur, davet edene "arkadaşın oldu" bildirimi gider.
 // Görünen ad henüz seçilmediyse Arkadaşlar sekmesine geçer, ad seçilince kod paneli orada açılır.
@@ -13,17 +14,18 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 
 import {
+  clearLaterInvite,
   cleanCode,
   enableInviteNotifications,
   isValidCode,
   notifyInvitesChanged,
   requestInvite,
+  saveLaterInvite,
   setPendingInviteCode,
 } from '@/lib/invite';
 import { openTabFromNotification } from '@/lib/ask';
 import { loadLang } from '@/lib/i18n';
 import { track } from '@/lib/analytics';
-import { Avatar } from '@/components/QrSheet';
 
 const BG = '#F4F5F7';
 const INK = '#16161A';
@@ -40,7 +42,12 @@ const T = {
     text: (n: string) =>
       `Kabul edersen ${n ? n + ' ile' : 'arkadaşınla'} arkadaş olursunuz. Birbirinizin şu anki anını görür, birbirinize “Şu an ne yapıyorsun?” diye sorabilirsiniz.`,
     send: 'Kabul et',
+    later: 'Daha sonra',
     cancel: 'Reddet',
+    laterTitle: 'Tamam, sonra karar ver 🕐',
+    laterText: (n: string) =>
+      `Davet 24 saat geçerli. ${n ? n + ' daveti' : 'Davet'} Arkadaşlar sekmesinin en üstünde duruyor, oradan istediğin zaman kabul edebilirsin.`,
+    ok: 'Tamam',
     sentTitle: 'Artık arkadaşsınız 🎉',
     sentText: (n: string) =>
       `${n || 'Arkadaşın'} arkadaş listene eklendi, ona da haber verdik. Şu anki anını görebilir, ona sorabilirsin 👀`,
@@ -63,7 +70,12 @@ const T = {
     text: (n: string) =>
       `Accept and you'll be friends with ${n || 'your friend'}. You'll see each other's current moment and can ask “What are you doing right now?”`,
     send: 'Accept',
+    later: 'Later',
     cancel: 'Decline',
+    laterTitle: 'Okay, decide later 🕐',
+    laterText: (n: string) =>
+      `The invite is valid for 24 hours. It's at the top of the Friends tab; you can accept ${n || 'your friend'} from there anytime.`,
+    ok: 'OK',
     sentTitle: "You're friends now 🎉",
     sentText: (n: string) =>
       `${n || 'Your friend'} was added to your list and we let them know. See their current moment and ask them 👀`,
@@ -82,7 +94,7 @@ const T = {
   },
 };
 
-type Phase = 'ask' | 'busy' | 'sent' | 'done';
+type Phase = 'ask' | 'busy' | 'sent' | 'done' | 'later';
 
 export default function DavetLink() {
   const router = useRouter();
@@ -104,6 +116,19 @@ export default function DavetLink() {
       .then((l) => setLang(l === 'en' ? 'en' : 'tr'))
       .catch(() => {});
   }, []);
+
+  // Karar vermeden çıkış: daveti sakla (Arkadaşlar sekmesinde "Bekleyen davet")
+  function later() {
+    Haptics.selectionAsync().catch(() => {});
+    saveLaterInvite(code, name || fromName).then(() => notifyInvitesChanged());
+    setPhase('later');
+  }
+
+  function decline() {
+    Haptics.selectionAsync().catch(() => {});
+    clearLaterInvite().then(() => notifyInvitesChanged());
+    leave();
+  }
 
   function leave() {
     openTabFromNotification('friends');
@@ -145,6 +170,7 @@ export default function DavetLink() {
       return;
     }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    await clearLaterInvite();
     const joined = (r as { ok: true; name: string }).name;
     if (joined) setName(joined);
     notifyInvitesChanged();
@@ -159,13 +185,26 @@ export default function DavetLink() {
     <View style={[styles.root, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 20 }]}>
       <StatusBar style="dark" />
       <View style={styles.topBar}>
-        <Pressable onPress={leave} hitSlop={12} accessibilityRole="button" accessibilityLabel={t.cancel}>
+        <Pressable
+          onPress={phase === 'ask' ? later : leave}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel={phase === 'ask' ? t.later : t.ok}
+        >
           <Ionicons name="close" size={26} color={SOFT} />
         </Pressable>
       </View>
 
       <View style={styles.body}>
-        {phase === 'sent' ? (
+        {phase === 'later' ? (
+          <>
+            <View style={styles.wave}>
+              <Text style={styles.waveEmoji}>🕐</Text>
+            </View>
+            <Text style={styles.title}>{t.laterTitle}</Text>
+            <Text style={styles.text}>{t.laterText(showName)}</Text>
+          </>
+        ) : phase === 'sent' ? (
           <>
             <View style={styles.okIcon}>
               <Ionicons name="checkmark" size={40} color="#FFFFFF" />
@@ -175,8 +214,8 @@ export default function DavetLink() {
           </>
         ) : (
           <>
-            <View style={styles.avatarWrap}>
-              <Avatar name={showName || '?'} />
+            <View style={styles.wave}>
+              <Text style={styles.waveEmoji}>👋</Text>
             </View>
             <Text style={styles.title}>{t.title(showName)}</Text>
             <View style={styles.codeBox}>
@@ -194,13 +233,13 @@ export default function DavetLink() {
       </View>
 
       <View style={styles.actions}>
-        {phase === 'sent' || phase === 'done' ? (
+        {phase === 'sent' || phase === 'done' || phase === 'later' ? (
           <Pressable
             style={({ pressed }) => [styles.primaryBtn, pressed && { opacity: 0.85 }]}
             onPress={leave}
             accessibilityRole="button"
           >
-            <Text style={styles.primaryText}>{t.toFriends}</Text>
+            <Text style={styles.primaryText}>{phase === 'later' ? t.ok : t.toFriends}</Text>
           </Pressable>
         ) : (
           <>
@@ -216,8 +255,11 @@ export default function DavetLink() {
                 <Text style={styles.primaryText}>{t.send}</Text>
               )}
             </Pressable>
-            <Pressable style={styles.ghostBtn} onPress={leave} accessibilityRole="button">
-              <Text style={styles.ghostText}>{t.cancel}</Text>
+            <Pressable style={styles.ghostBtn} onPress={later} disabled={phase === 'busy'} accessibilityRole="button">
+              <Text style={styles.ghostText}>{t.later}</Text>
+            </Pressable>
+            <Pressable style={styles.linkBtn} onPress={decline} disabled={phase === 'busy'} hitSlop={8} accessibilityRole="button">
+              <Text style={styles.linkText}>{t.cancel}</Text>
             </Pressable>
           </>
         )}
@@ -230,7 +272,23 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG, paddingHorizontal: 24 },
   topBar: { height: 44, justifyContent: 'center' },
   body: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
-  avatarWrap: { transform: [{ scale: 1.6 }], marginBottom: 14 },
+  wave: {
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    backgroundColor: ACCENT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+    shadowColor: ACCENT,
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+  waveEmoji: { fontSize: 54 },
+  linkBtn: { alignItems: 'center', paddingVertical: 6 },
+  linkText: { fontFamily: F.medium, fontSize: 15, color: MUTED },
   okIcon: {
     width: 76,
     height: 76,

@@ -399,7 +399,7 @@ const FILTERS = [
   { id: 'gender', label: 'Cinsiyet' },
 ] as const;
 
-// 1.5.1: 15-17 yaş grubu eklendi (uygulama 15 yaş ve üstü)
+// Uygulama 15 yaş ve üstü, ama 15-17 listede gösterilmiyor (yetişkinler "çocuklar da mı kullanıyor" demesin)
 const AGE_RANGES = ['18-24', '25-34', '35-44', '45-54', '55+'];
 
 const CITIES = [
@@ -1739,7 +1739,7 @@ const hs = StyleSheet.create({
   topNowRow: { flexDirection: 'row', alignItems: 'center', gap: SP.xs + 2, marginTop: SP.md },
   topNowText: { flexShrink: 1, fontFamily: F.regular, fontSize: FS.sm, color: '#AFC0E8' },
   topNowStrong: { fontFamily: F.bold, color: '#ffffff' },
-  notifyRow: { flexDirection: 'row', alignItems: 'center', gap: SP.sm, marginTop: SP.sm },
+  notifyRow: { flexDirection: 'row', alignItems: 'center', gap: SP.sm, marginTop: SP.xs },
   notifyText: { fontFamily: F.medium, fontSize: FS.sm, color: INK },
   notifySub: { fontFamily: F.regular, fontSize: FS.xs, color: SOFT, marginTop: 1 },
   streakPending: { backgroundColor: 'rgba(255,255,255,0.08)' },
@@ -3060,6 +3060,7 @@ export default function HomeScreen() {
             <SelamCard activityId={selected.id} fg={fg} bg={bg} lang={lang} />
           ) : null}
 
+          {/* Sayaç + hatırlatma tek kutuda; butonlar yan yana (oran kartı sıkışmasın) */}
           <View style={styles.timerBox}>
             <View style={styles.timerLabels}>
               <Text style={styles.timerText}>
@@ -3077,50 +3078,64 @@ export default function HomeScreen() {
             </View>
             <View style={hs.notifyRow}>
               <Ionicons name={endNotify ? 'notifications' : 'notifications-outline'} size={16} color={endNotify ? fg : SOFT} />
-              <View style={{ flex: 1 }}>
-                <Text style={hs.notifyText}>{lang === 'tr' ? '1 saat sonra bana hatırlat' : 'Remind me in an hour'}</Text>
-                <Text style={hs.notifySub}>{lang === 'tr' ? 'Günde en fazla 2 kez, 09:00 – 22:00' : 'Up to twice a day, 9 AM – 10 PM'}</Text>
-              </View>
+              <Text style={[hs.notifyText, { flex: 1 }]} numberOfLines={2}>
+                {lang === 'tr' ? '1 saat sonra hatırlat' : 'Remind me in an hour'}
+                <Text style={hs.notifySub}>{lang === 'tr' ? ' · günde en fazla 2 kez' : ' · up to twice a day'}</Text>
+              </Text>
               <Switch
                 value={endNotify}
                 onValueChange={toggleEndNotify}
                 trackColor={{ false: '#D9DBE1', true: fg }}
                 thumbColor="#ffffff"
                 ios_backgroundColor="#D9DBE1"
-                style={{ transform: [{ scale: 0.85 }] }}
+                style={{ transform: [{ scale: 0.8 }] }}
                 accessibilityLabel={lang === 'tr' ? '1 saat sonra bana hatırlat' : 'Remind me in an hour'}
               />
             </View>
           </View>
 
-          <View style={styles.buttonsCol}>
+          <View style={styles.buttonsRow}>
             {resultShown || noData ? (
-              <View ref={shareBtnRef} collapsable={false}>
-                <Pressable style={[styles.primaryAction, { backgroundColor: fg }]} onPress={openSharePreview}>
+              <View ref={shareBtnRef} collapsable={false} style={{ flex: 1.6 }}>
+                <Pressable
+                  style={[styles.primaryAction, { backgroundColor: fg }]}
+                  onPress={openSharePreview}
+                  accessibilityLabel={selected.mood ? tx.shareMood : tx.shareActivity}
+                >
                   <Ionicons name="share-social-outline" size={18} color="#ffffff" />
-                  <Text style={styles.primaryActionText}>{selected.mood ? tx.shareMood : tx.shareActivity}</Text>
+                  <Text style={styles.primaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+                    {lang === 'tr' ? 'Arkadaşınla paylaş' : 'Share with a friend'}
+                  </Text>
                 </Pressable>
               </View>
             ) : null}
             {inGrace() ? (
               <Pressable
-                style={styles.secondaryAction}
+                style={[styles.secondaryAction, { flex: 1 }]}
                 onPress={() => {
                   tap();
                   changeActivity();
                 }}
+                accessibilityLabel={selected.mood ? tx.changeMood : tx.changeActivity}
               >
-                <Text style={styles.buttonText}>{selected.mood ? tx.changeMood : tx.changeActivity}</Text>
+                <Ionicons name="refresh" size={17} color={INK} />
+                <Text style={styles.buttonText} numberOfLines={1}>
+                  {lang === 'tr' ? 'Değiştir' : 'Change'}
+                </Text>
               </Pressable>
             ) : (
               <Pressable
-                style={styles.secondaryAction}
+                style={[styles.secondaryAction, { flex: 1 }]}
                 onPress={() => {
                   tap();
                   goHome();
                 }}
+                accessibilityLabel={lang === 'tr' ? 'Ana ekrana dön' : 'Back to home'}
               >
-                <Text style={styles.buttonText}>{lang === 'tr' ? 'Ana ekrana dön' : 'Back to home'}</Text>
+                <Ionicons name="home-outline" size={17} color={INK} />
+                <Text style={styles.buttonText} numberOfLines={1}>
+                  {lang === 'tr' ? 'Ana ekran' : 'Home'}
+                </Text>
               </Pressable>
             )}
           </View>
@@ -3793,9 +3808,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
     backgroundColor: '#ffffff',
     borderRadius: SP.lg,
     paddingVertical: SP.md + 3,
+    paddingHorizontal: SP.sm,
     ...SOFT_SHADOW,
   },
   chip: {
@@ -3963,9 +3980,17 @@ const styles = StyleSheet.create({
     marginBottom: SP.sm + 2,
   },
 
-  timerBox: { marginBottom: SP.md + SP.xs, marginTop: SP.lg },
+  timerBox: {
+    marginBottom: SP.md,
+    marginTop: SP.sm + 2,
+    backgroundColor: '#ffffff',
+    borderRadius: 18,
+    paddingHorizontal: SP.md,
+    paddingTop: SP.sm + 2,
+    paddingBottom: SP.xs,
+  },
   timerText: { fontFamily: F.regular, fontSize: FS.xs, color: SOFT, marginBottom: SP.xs + 2 },
-  timerTrack: { height: 6, backgroundColor: 'rgba(255,255,255,0.8)', borderRadius: 3 },
+  timerTrack: { height: 6, backgroundColor: '#EEF0F3', borderRadius: 3 },
   timerFill: { height: 6, borderRadius: 3 },
 
   buttonsRow: { flexDirection: 'row', gap: SP.sm + 2 },

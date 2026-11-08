@@ -48,18 +48,21 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AskResult, getAllowAsks, recentAsks, registerPushToken, sendAsk, setAllowAsks } from '@/lib/ask';
 import {
   cancelSentRequest,
+  clearLaterInvite,
   cleanCode,
   createInvite,
   CreateInviteResult,
   decideInviteRequest,
   enableInviteNotifications,
   getInviteRequests,
+  getLaterInvite,
   getMyInvites,
   getSentRequests,
   Invite,
   inviteMessage,
   InviteRequest,
   isValidCode,
+  LaterInvite,
   onInviteCode,
   onInvitesChanged,
   requestInvite,
@@ -209,6 +212,12 @@ const T = {
     notifOffTitle: '🔕 Bildirimlerin kapalı',
     notifOffText: 'Arkadaşların “Şu an ne yapıyorsun?” diye sorunca ya da davetinle eklenince haber alamazsın.',
     notifOn: 'Aç',
+    laterTitle: (n: string) => `${n || 'Arkadaşın'} seni eklemek istiyor 👋`,
+    laterSub: (left: string) => `Bekleyen davet · ${left} kaldı`,
+    laterAccept: 'Kabul et',
+    laterDeleteAsk: 'Davet silinsin mi?',
+    laterDeleteText: 'Arkadaşına bir şey gitmez. Sonra eklemek istersen yeni bir link isteyebilirsin.',
+    laterDelete: 'Sil',
     decideErr: {
       not_found: 'Bu istek artık geçerli değil.',
       limit_me: 'Arkadaş sınırına ulaştın (50).',
@@ -339,6 +348,12 @@ const T = {
     notifOffTitle: '🔕 Notifications are off',
     notifOffText: "You won't know when friends ask what you're doing or join with your invite.",
     notifOn: 'Turn on',
+    laterTitle: (n: string) => `${n || 'A friend'} wants to add you 👋`,
+    laterSub: (left: string) => `Pending invite · ${left} left`,
+    laterAccept: 'Accept',
+    laterDeleteAsk: 'Delete this invite?',
+    laterDeleteText: "Your friend won't be notified. If you change your mind, ask them for a new link.",
+    laterDelete: 'Delete',
     decideErr: {
       not_found: 'This request is no longer valid.',
       limit_me: "You've reached the friend limit (50).",
@@ -401,16 +416,24 @@ export function FriendsTab({
   const [sent, setSent] = useState<SentRequest[]>([]);
   const [newFriends, setNewFriends] = useState<Friend[]>([]);
   const [notifOff, setNotifOff] = useState(false);
+  const [laterInv, setLaterInv] = useState<LaterInvite | null>(null);
+  const [laterBusy, setLaterBusy] = useState(false);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
   const pendingCodeRef = useRef<string | null>(null);
   const invitesRef = useRef<Invite[]>([]);
   invitesRef.current = invites;
 
   const loadInvites = useCallback(async () => {
-    const [rq, inv, sn] = await Promise.all([getInviteRequests(), getMyInvites(), getSentRequests()]);
+    const [rq, inv, sn, li] = await Promise.all([
+      getInviteRequests(),
+      getMyInvites(),
+      getSentRequests(),
+      getLaterInvite(),
+    ]);
     setRequests(rq);
     setInvites(inv);
     setSent(sn);
+    setLaterInv(li);
   }, []);
 
   const load = useCallback(async () => {
@@ -706,6 +729,47 @@ export function FriendsTab({
     setTimeout(() => whenOverlayFree(() => setSentName(joinedName)), 700);
   }
 
+  // "Daha sonra" denen daveti kabul et
+  async function acceptLater() {
+    if (!laterInv || laterBusy) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    setLaterBusy(true);
+    await enableInviteNotifications();
+    const r = await requestInvite(laterInv.code);
+    setLaterBusy(false);
+    if ('error' in r) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      // Geçersiz olduysa (süresi doldu, doldu, zaten arkadaş, kendi davetin) listeden kaldır
+      if (r.error !== 'network' && r.error !== 'too_many') {
+        await clearLaterInvite();
+        setLaterInv(null);
+      }
+      Alert.alert(t.codeErr[r.error], undefined, [{ text: t.ok }]);
+      if (r.error === 'already') load().catch(() => {});
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    await clearLaterInvite();
+    setLaterInv(null);
+    load().catch(() => {});
+    const joinedName = (r as { ok: true; name: string }).name || laterInv.name;
+    whenOverlayFree(() => setSentName(joinedName));
+  }
+
+  function askDeleteLater() {
+    Alert.alert(t.laterDeleteAsk, t.laterDeleteText, [
+      { text: t.cancel, style: 'cancel' },
+      {
+        text: t.laterDelete,
+        style: 'destructive',
+        onPress: async () => {
+          await clearLaterInvite();
+          setLaterInv(null);
+        },
+      },
+    ]);
+  }
+
   function askCancelSent(rq: SentRequest) {
     Alert.alert(t.cancelReqAsk, t.cancelReqText(rq.name), [
       { text: t.cancel, style: 'cancel' },
@@ -822,6 +886,45 @@ export function FriendsTab({
             )}
           </Pressable>
         </View>
+
+        {laterInv ? (
+          <View style={[styles.row, styles.requestRow]}>
+            <View style={styles.laterIcon}>
+              <Text style={{ fontSize: 20 }}>👋</Text>
+            </View>
+            <View style={{ flex: 1, gap: 3 }}>
+              <Text style={styles.name} numberOfLines={2}>
+                {t.laterTitle(laterInv.name)}
+              </Text>
+              <Text style={styles.statusMuted} numberOfLines={1}>
+                {t.laterSub(left(laterInv.savedAt + 24 * 3600 * 1000))}
+              </Text>
+            </View>
+            {laterBusy ? (
+              <ActivityIndicator color={ACCENT} />
+            ) : (
+              <>
+                <Pressable
+                  style={({ pressed }) => [styles.askBtn, pressed && { opacity: 0.85 }]}
+                  onPress={acceptLater}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.askText}>{t.laterAccept}</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.xBtn}
+                  onPress={askDeleteLater}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={t.laterDelete}
+                >
+                  <Ionicons name="close" size={18} color={MUTED} />
+                </Pressable>
+              </>
+            )}
+          </View>
+        ) : null}
 
         {newFriends.length > 0 ? (
           <View style={[styles.row, styles.requestRow]}>
@@ -1491,6 +1594,7 @@ const styles = StyleSheet.create({
   addText: { fontFamily: F.bold, fontSize: 14, color: '#FFFFFF' },
   sectionHead: { fontFamily: F.bold, fontSize: 12, letterSpacing: 1, color: MUTED, marginTop: 6, marginLeft: 4, marginBottom: -4 },
   requestRow: { borderWidth: 1.5, borderColor: '#C7D2FE' },
+  laterIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E0E7FF', alignItems: 'center', justifyContent: 'center' },
   xBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F0F1F4', alignItems: 'center', justifyContent: 'center' },
   codeBadge: { minWidth: 58, height: 44, borderRadius: 12, backgroundColor: '#E6ECFF', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
   codeBadgeText: { fontFamily: F.bold, fontSize: 16, letterSpacing: 1, color: ACCENT },

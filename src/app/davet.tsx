@@ -1,9 +1,9 @@
 // Davet linki: aktiviteapp://davet?c=K472&n=Kaan
 // Web'deki davet sayfasındaki "Uygulamada aç" butonu buraya gelir.
-// Daveti bu ekranda gösterir: "Kaan seni arkadaş olarak eklemek istiyor" → İstek gönder / Vazgeç.
+// Daveti bu ekranda gösterir: "Kaan seni arkadaş olarak eklemek istiyor" → Kabul et / Reddet.
 // (Eskiden Arkadaşlar sekmesine geçip orada panel açıyorduk; iPhone ekran geçişi sırasında açılan paneli göstermiyordu.)
-// İstek gidince davet eden onaylarsa arkadaş olunur. Görünen ad henüz seçilmediyse Arkadaşlar sekmesine
-// geçer, ad seçilince kod paneli orada açılır.
+// Kabul edince ikisi hemen arkadaş olur, davet edene "arkadaşın oldu" bildirimi gider.
+// Görünen ad henüz seçilmediyse Arkadaşlar sekmesine geçer, ad seçilince kod paneli orada açılır.
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -31,18 +31,19 @@ const SOFT = '#4A4E5A';
 const MUTED = '#6B6F7B';
 const ACCENT = '#3F3BC9';
 const DANGER = '#B3261E';
+const F = { regular: 'DMSans_400Regular', medium: 'DMSans_500Medium', bold: 'DMSans_700Bold' };
 
 const T = {
   tr: {
     title: (n: string) => (n ? `${n} seni arkadaş olarak eklemek istiyor 👋` : 'Arkadaşın seni Şu An’a davet ediyor 👋'),
     code: 'Davet kodu',
     text: (n: string) =>
-      `İstek gönderirsen ${n || 'arkadaşın'} onaylayınca arkadaş olursunuz. Birbirinizin şu anki anını görür, birbirinize “Şu an ne yapıyorsun?” diye sorabilirsiniz.`,
-    send: 'İstek gönder',
-    cancel: 'Vazgeç',
-    sentTitle: 'İstek gönderildi ✅',
+      `Kabul edersen ${n ? n + ' ile' : 'arkadaşınla'} arkadaş olursunuz. Birbirinizin şu anki anını görür, birbirinize “Şu an ne yapıyorsun?” diye sorabilirsiniz.`,
+    send: 'Kabul et',
+    cancel: 'Reddet',
+    sentTitle: 'Artık arkadaşsınız 🎉',
     sentText: (n: string) =>
-      `${n || 'Arkadaşın'} onaylayınca arkadaş olacaksınız. Onaylandığında bildirim gelir. İsteğini Arkadaşlar sekmesinde “Gönderdiğin istekler” altında görebilirsin.`,
+      `${n || 'Arkadaşın'} arkadaş listene eklendi, ona da haber verdik. Şu anki anını görebilir, ona sorabilirsin 👀`,
     toFriends: 'Arkadaşlarıma git',
     err: {
       too_many: 'Çok fazla deneme yaptın. 1 saat sonra tekrar dene.',
@@ -52,6 +53,7 @@ const T = {
       already: 'Zaten arkadaşsınız 🎉',
       pending: 'İsteğin zaten gönderildi, onay bekleniyor.',
       limit_me: 'Arkadaş sınırına ulaştın (50).',
+      limit_them: 'Arkadaşının listesi dolu (50).',
       network: 'Bağlantı kurulamadı. İnternetini kontrol edip tekrar dene.',
     } as Record<string, string>,
   },
@@ -59,12 +61,12 @@ const T = {
     title: (n: string) => (n ? `${n} wants to add you as a friend 👋` : 'A friend invited you to Şu An 👋'),
     code: 'Invite code',
     text: (n: string) =>
-      `Send a request and you'll be friends once ${n || 'your friend'} approves. You'll see each other's current moment and can ask “What are you doing right now?”`,
-    send: 'Send request',
-    cancel: 'Not now',
-    sentTitle: 'Request sent ✅',
+      `Accept and you'll be friends with ${n || 'your friend'}. You'll see each other's current moment and can ask “What are you doing right now?”`,
+    send: 'Accept',
+    cancel: 'Decline',
+    sentTitle: "You're friends now 🎉",
     sentText: (n: string) =>
-      `You'll be friends once ${n || 'your friend'} approves. You'll get a notification. You can see it in the Friends tab under “Requests you sent”.`,
+      `${n || 'Your friend'} was added to your list and we let them know. See their current moment and ask them 👀`,
     toFriends: 'Go to my friends',
     err: {
       too_many: 'Too many attempts. Try again in an hour.',
@@ -74,6 +76,7 @@ const T = {
       already: "You're already friends 🎉",
       pending: 'Your request was already sent and is waiting for approval.',
       limit_me: 'You reached the friend limit (50).',
+      limit_them: "Your friend's list is full (50).",
       network: "Couldn't connect. Check your internet and try again.",
     } as Record<string, string>,
   },
@@ -125,7 +128,7 @@ export default function DavetLink() {
     setErr('');
     setErrKind('');
     setPhase('busy');
-    // Arkadaşın onaylayınca bildirim gelsin
+    // Arkadaşın sana sorunca bildirim gelsin
     await enableInviteNotifications();
     const r = await requestInvite(code);
     if ('error' in r) {
@@ -237,7 +240,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 4,
   },
-  title: { fontSize: 25, lineHeight: 32, fontWeight: '800', color: INK, textAlign: 'center' },
+  title: { fontSize: 25, lineHeight: 32, fontFamily: F.bold, color: INK, textAlign: 'center' },
   codeBox: {
     backgroundColor: '#FFFFFF',
     borderRadius: 18,
@@ -246,10 +249,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
-  codeLabel: { fontSize: 12, fontWeight: '700', letterSpacing: 1.2, color: MUTED, textTransform: 'uppercase' },
-  codeText: { fontSize: 30, fontWeight: '800', color: ACCENT, letterSpacing: 2 },
-  text: { fontSize: 15.5, lineHeight: 22, color: SOFT, textAlign: 'center', paddingHorizontal: 6 },
-  err: { fontSize: 15, lineHeight: 21, color: DANGER, textAlign: 'center', fontWeight: '600', paddingHorizontal: 6 },
+  codeLabel: { fontSize: 12, fontFamily: F.bold, letterSpacing: 1.2, color: MUTED, textTransform: 'uppercase' },
+  codeText: { fontSize: 30, fontFamily: F.bold, color: ACCENT, letterSpacing: 2 },
+  text: { fontFamily: F.regular, fontSize: 15.5, lineHeight: 22, color: SOFT, textAlign: 'center', paddingHorizontal: 6 },
+  err: { fontSize: 15, lineHeight: 21, color: DANGER, textAlign: 'center', fontFamily: F.medium, paddingHorizontal: 6 },
   actions: { gap: 10 },
   primaryBtn: {
     height: 56,
@@ -258,7 +261,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  primaryText: { color: '#FFFFFF', fontSize: 17, fontWeight: '800' },
+  primaryText: { color: '#FFFFFF', fontSize: 17, fontFamily: F.bold },
   ghostBtn: {
     height: 52,
     borderRadius: 16,
@@ -266,5 +269,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  ghostText: { color: INK, fontSize: 16, fontWeight: '700' },
+  ghostText: { color: INK, fontSize: 16, fontFamily: F.bold },
 });

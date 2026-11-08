@@ -2,8 +2,8 @@
 // sessize alma, arkadaşlıktan çıkarma ve şikayet. Arkadaşlar sadece birbirinin ŞU ANKİ anını görür.
 // 1.5.0: "Sor" düğmesi (şu an bir an seçmemiş arkadaşa "Şu an ne yapıyorsun?" bildirimi) ve
 // listenin altında "Arkadaşlarım bana sorabilsin" ayarı.
-// 1.5.1: link / kod ile davet (uzaktaki arkadaş). Kodu kullanan kişi istek gönderir,
-// davet eden onaylarsa arkadaş olurlar. Bekleyen istekler ve aktif davet listenin üstünde.
+// 1.5.1: link / kod ile davet (uzaktaki arkadaş). Linki açan kişi "Kabul et" derse hemen arkadaş olurlar,
+// davet edene haber gider. Yeni arkadaş uyarısı, bildirim kapalı kartı ve aktif davet listenin üstünde.
 import { ComponentType, ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -43,7 +43,9 @@ import {
 import { checkDisplayName, cleanDisplayName, Me, NAME_MAX, nameError, nameLength } from '@/lib/me';
 import { Avatar, QrSheet } from '@/components/QrSheet';
 import { whenOverlayFree } from '@/lib/overlay';
-import { AskResult, getAllowAsks, recentAsks, sendAsk, setAllowAsks } from '@/lib/ask';
+import { hasNotificationPermission, requestNotificationPermission } from '@/lib/notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AskResult, getAllowAsks, recentAsks, registerPushToken, sendAsk, setAllowAsks } from '@/lib/ask';
 import {
   cancelSentRequest,
   cleanCode,
@@ -66,7 +68,10 @@ import {
   SentRequest,
   shareInviteOther,
   shareInviteWhatsApp,
+  takeNewFriends,
 } from '@/lib/invite';
+
+const NOTIF_CARD_KEY = 'notif_card_hide_until'; // "Bildirimlerin kapalı" kartı kapatılınca 7 gün gösterme
 
 const BG = '#F4F5F7';
 const INK = '#16161A';
@@ -166,11 +171,11 @@ const T = {
     friendsHead: 'ARKADAŞLARIN',
     haveCode: 'Davet kodum var',
     inviteReady: 'Davetin hazır 🎉',
-    inviteReadySub: 'Linki gönder ya da kodu söyle.\n24 saat geçerli · en fazla 10 kişi',
+    inviteReadySub: 'Linki sadece eklemek istediğin kişiye gönder; kabul eden doğrudan arkadaşın olur.\n24 saat geçerli · en fazla 10 kişi',
     inviteCodeLabel: 'DAVET KODU',
     sendWhatsApp: "WhatsApp'ta gönder",
     sendOther: 'Başka yolla paylaş',
-    inviteNote: 'Katılanlar sana istek olarak düşer.\nSen onaylamadan kimse arkadaşın olmaz.',
+    inviteNote: 'Linki açıp kabul eden arkadaşın olur, sana haber gelir.\nİstemediğin biri eklenirse listeden kaldırabilirsin.',
     inviteErr: {
       no_profile: 'Önce görünen adını seç.',
       limit_me: 'Arkadaş sınırına ulaştın (50).',
@@ -180,10 +185,10 @@ const T = {
     } as Record<Exclude<CreateInviteResult, { ok: true }>['error'], string>,
     codeTitle: 'Davet kodun var mı?',
     codeSub: 'Arkadaşının gönderdiği 4 haneli kodu yaz (ör. K472).',
-    codeSend: 'İstek gönder',
+    codeSend: 'Arkadaş ol',
     codeHint: 'Yanlış kodu çok kez denersen 1 saat beklersin.',
     ownCodeTitle: 'Bu senin davet kodun 🙂',
-    ownCodeText: 'Linki arkadaşına gönder. O açınca sana istek gelir, sen onaylarsın.',
+    ownCodeText: 'Linki arkadaşına gönder. O açıp kabul edince arkadaş olursunuz.',
     codeErr: {
       no_profile: 'Önce görünen adını seç.',
       too_many: 'Çok fazla deneme yaptın. 1 saat sonra tekrar dene.',
@@ -193,10 +198,17 @@ const T = {
       already: 'Zaten arkadaşsınız.',
       pending: 'İsteğin zaten gönderildi, onay bekleniyor.',
       limit_me: 'Arkadaş sınırına ulaştın (50).',
+      limit_them: 'Arkadaşının listesi dolu (50).',
       network: 'Bağlantı kurulamadı. İnternetini kontrol edip tekrar dene.',
     } as Record<Exclude<RequestInviteResult, { ok: true }>['error'], string>,
-    sentTitle: 'İstek gönderildi ✓',
-    sentText: (n: string) => `${n || 'Arkadaşın'} onaylayınca arkadaş olacaksınız. Onaylandığında sana haber vereceğiz 🔔`,
+    sentTitle: 'Artık arkadaşsınız 🎉',
+    sentText: (n: string) => `${n || 'Arkadaşın'} listene eklendi. Şu anki anını görebilir, ona “Şu an ne yapıyorsun?” diye sorabilirsin 👀`,
+    newFriend: (names: string) => `🎉 ${names} arkadaşın oldu`,
+    newFriendSub: 'Listene eklendi.',
+    removeShort: 'Kaldır',
+    notifOffTitle: '🔕 Bildirimlerin kapalı',
+    notifOffText: 'Arkadaşların “Şu an ne yapıyorsun?” diye sorunca ya da davetinle eklenince haber alamazsın.',
+    notifOn: 'Aç',
     decideErr: {
       not_found: 'Bu istek artık geçerli değil.',
       limit_me: 'Arkadaş sınırına ulaştın (50).',
@@ -289,11 +301,11 @@ const T = {
     friendsHead: 'YOUR FRIENDS',
     haveCode: 'I have an invite code',
     inviteReady: 'Your invite is ready 🎉',
-    inviteReadySub: 'Send the link or tell them the code.\nValid for 24 hours · up to 10 people',
+    inviteReadySub: 'Send the link only to the person you want to add; whoever accepts becomes your friend.\nValid for 24 hours · up to 10 people',
     inviteCodeLabel: 'INVITE CODE',
     sendWhatsApp: 'Send on WhatsApp',
     sendOther: 'Share another way',
-    inviteNote: "People who join show up as requests.\nNo one becomes your friend until you approve.",
+    inviteNote: "Whoever opens the link and accepts becomes your friend; you'll be notified.\nYou can remove anyone you don't want.",
     inviteErr: {
       no_profile: 'Choose your display name first.',
       limit_me: "You've reached the friend limit (50).",
@@ -303,10 +315,10 @@ const T = {
     } as Record<Exclude<CreateInviteResult, { ok: true }>['error'], string>,
     codeTitle: 'Have an invite code?',
     codeSub: 'Enter the 4-character code your friend sent you (e.g. K472).',
-    codeSend: 'Send request',
+    codeSend: 'Add friend',
     codeHint: "Too many wrong codes and you'll need to wait an hour.",
     ownCodeTitle: 'This is your own invite code 🙂',
-    ownCodeText: 'Send the link to a friend. When they open it, you get a request to approve.',
+    ownCodeText: "Send the link to a friend. Once they open it and accept, you're friends.",
     codeErr: {
       no_profile: 'Choose your display name first.',
       too_many: 'Too many tries. Try again in an hour.',
@@ -316,10 +328,17 @@ const T = {
       already: "You're already friends.",
       pending: 'Your request is already sent and waiting for approval.',
       limit_me: "You've reached the friend limit (50).",
+      limit_them: "Your friend's list is full (50).",
       network: "Couldn't connect. Check your internet and try again.",
     } as Record<Exclude<RequestInviteResult, { ok: true }>['error'], string>,
-    sentTitle: 'Request sent ✓',
-    sentText: (n: string) => `You'll be friends once ${n || 'your friend'} approves. We'll let you know 🔔`,
+    sentTitle: "You're friends now 🎉",
+    sentText: (n: string) => `${n || 'Your friend'} was added to your list. See their current moment and ask “What are you doing right now?” 👀`,
+    newFriend: (names: string) => `🎉 ${names} is now your friend`,
+    newFriendSub: 'Added to your list.',
+    removeShort: 'Remove',
+    notifOffTitle: '🔕 Notifications are off',
+    notifOffText: "You won't know when friends ask what you're doing or join with your invite.",
+    notifOn: 'Turn on',
     decideErr: {
       not_found: 'This request is no longer valid.',
       limit_me: "You've reached the friend limit (50).",
@@ -380,6 +399,8 @@ export function FriendsTab({
   const [codeFromLink, setCodeFromLink] = useState(false); // linkten geldiyse klavye kendiliğinden açılmasın
   const [sentName, setSentName] = useState<string | null>(null);
   const [sent, setSent] = useState<SentRequest[]>([]);
+  const [newFriends, setNewFriends] = useState<Friend[]>([]);
+  const [notifOff, setNotifOff] = useState(false);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
   const pendingCodeRef = useRef<string | null>(null);
   const invitesRef = useRef<Invite[]>([]);
@@ -392,19 +413,37 @@ export function FriendsTab({
     setSent(sn);
   }, []);
 
-  // Davet ekranından istek gönderilince listeleri hemen yenile
-  useEffect(() => onInvitesChanged(() => loadInvites().catch(() => {})), [loadInvites]);
-
   const load = useCallback(async () => {
     try {
       const list = await getFriends();
       setFriends(list);
       setLoadFailed(false);
+      // Davet linkiyle yeni eklenen var mı? (bildirim kapalı olsa da burada görünsün)
+      const fresh = await takeNewFriends(list.map((f) => f.id));
+      if (fresh.length) {
+        const add = list.filter((f) => fresh.includes(f.id));
+        setNewFriends((cur) => [...cur.filter((c) => !fresh.includes(c.id)), ...add]);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      }
     } catch {
       setLoadFailed(true);
     }
     loadInvites().catch(() => {});
   }, [loadInvites]);
+
+  // Davet ekranında kabul edilince listeyi hemen yenile
+  useEffect(() => onInvitesChanged(() => load().catch(() => {})), [load]);
+
+  // Bildirim izni yoksa uyarı kartı (kapatılırsa 7 gün gösterme)
+  const checkNotif = useCallback(async () => {
+    const ok = await hasNotificationPermission().catch(() => true);
+    if (ok) {
+      setNotifOff(false);
+      return;
+    }
+    const until = Number((await AsyncStorage.getItem(NOTIF_CARD_KEY).catch(() => null)) || 0);
+    setNotifOff(Date.now() > until);
+  }, []);
 
   // Davet linkinden gelen kod: kurulum bittiyse kod panelini doldurup aç, bitmediyse sonra aç
   const setupRef = useRef<boolean | null>(null);
@@ -456,10 +495,11 @@ export function FriendsTab({
       setMutes(m);
       setSetup(s);
       if (s) load();
+      checkNotif();
       recentAsks().then(setAsked).catch(() => {});
       getAllowAsks().then(setAllowAsksState).catch(() => {});
     })();
-  }, [load]);
+  }, [load, checkNotif]);
 
   // Sekme açıkken 30 saniyede bir ve uygulamaya geri dönülünce yenile
   useEffect(() => {
@@ -468,13 +508,33 @@ export function FriendsTab({
       if (AppState.currentState === 'active') load();
     }, REFRESH_MS);
     const sub = AppState.addEventListener('change', (s) => {
-      if (s === 'active') load();
+      if (s === 'active') {
+        load();
+        checkNotif(); // ayarlardan açıp dönünce kart kaybolsun
+      }
     });
     return () => {
       clearInterval(id);
       sub.remove();
     };
-  }, [setup, load]);
+  }, [setup, load, checkNotif]);
+
+  async function turnOnNotifications() {
+    Haptics.selectionAsync().catch(() => {});
+    const ok = await requestNotificationPermission().catch(() => false);
+    if (ok) {
+      setNotifOff(false);
+      registerPushToken(true).catch(() => {});
+    } else {
+      // Daha önce reddedildiyse izin penceresi çıkmaz: telefon ayarlarını aç
+      Linking.openSettings().catch(() => {});
+    }
+  }
+
+  function hideNotifCard() {
+    setNotifOff(false);
+    AsyncStorage.setItem(NOTIF_CARD_KEY, String(Date.now() + 7 * 24 * 3600 * 1000)).catch(() => {});
+  }
 
   async function onRefresh() {
     setRefreshing(true);
@@ -495,6 +555,7 @@ export function FriendsTab({
 
   function askRemove(f: Friend) {
     setActionFor(null);
+    setNewFriends((cur) => cur.filter((x) => x.id !== f.id));
     setTimeout(() => {
       Alert.alert(t.removeAsk(f.name), t.removeAskText, [
         { text: t.cancel, style: 'cancel' },
@@ -640,7 +701,7 @@ export function FriendsTab({
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     setCodeOpen(false);
     const joinedName = (r as { ok: true; name: string }).name;
-    loadInvites().catch(() => {});
+    load().catch(() => {});
     // iPhone: kod paneli kapanırken yenisi açılırsa görünmüyordu; kapanma bitsin, sonra aç
     setTimeout(() => whenOverlayFree(() => setSentName(joinedName)), 700);
   }
@@ -703,6 +764,8 @@ export function FriendsTab({
         onDone={(name) => {
           onMeChange({ ...me, displayName: name });
           setSetup(true);
+          // Arkadaş özelliği açıldı: "Sor" ve davet bildirimleri gelebilsin diye izni iste, cihazı kaydet
+          enableInviteNotifications();
           setFriends([]);
           load();
           if (pendingCodeRef.current) {
@@ -759,6 +822,60 @@ export function FriendsTab({
             )}
           </Pressable>
         </View>
+
+        {newFriends.length > 0 ? (
+          <View style={[styles.row, styles.requestRow]}>
+            {newFriends.length === 1 ? <Avatar name={newFriends[0].name} /> : null}
+            <View style={{ flex: 1, gap: 3 }}>
+              <Text style={styles.name} numberOfLines={2}>
+                {t.newFriend(newFriends.map((f) => f.name).join(', '))}
+              </Text>
+              <Text style={styles.statusMuted} numberOfLines={1}>
+                {t.newFriendSub}
+              </Text>
+            </View>
+            {newFriends.length === 1 ? (
+              <Pressable style={styles.smallBtn} onPress={() => askRemove(newFriends[0])} hitSlop={6}>
+                <Text style={styles.smallBtnText}>{t.removeShort}</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              style={styles.xBtn}
+              onPress={() => setNewFriends([])}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={t.ok}
+            >
+              <Ionicons name="close" size={18} color={MUTED} />
+            </Pressable>
+          </View>
+        ) : null}
+
+        {notifOff ? (
+          <View style={styles.row}>
+            <View style={{ flex: 1, gap: 3 }}>
+              <Text style={styles.name}>{t.notifOffTitle}</Text>
+              <Text style={styles.cardSub}>{t.notifOffText}</Text>
+            </View>
+            <Pressable
+              style={({ pressed }) => [styles.askBtn, pressed && { opacity: 0.85 }]}
+              onPress={turnOnNotifications}
+              hitSlop={6}
+              accessibilityRole="button"
+            >
+              <Text style={styles.askText}>{t.notifOn}</Text>
+            </Pressable>
+            <Pressable
+              style={styles.xBtn}
+              onPress={hideNotifCard}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={t.ok}
+            >
+              <Ionicons name="close" size={18} color={MUTED} />
+            </Pressable>
+          </View>
+        ) : null}
 
         {requests.length > 0 ? (
           <>

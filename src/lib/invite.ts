@@ -1,8 +1,10 @@
 // Davet: uzaktaki arkadaşı link ya da 4 haneli kodla (ör. K472) eklemek.
 // Kurallar sunucuda: kod 24 saat geçerli, en fazla 10 kişi, günde en fazla 5 davet,
-// saatte 10 yanlış deneme sınırı. Kodu kullanan kişi doğrudan arkadaş olmaz:
-// davet edene İSTEK düşer, o onaylarsa arkadaş olurlar.
+// saatte 10 yanlış deneme sınırı. Linki/kodu açan kişi "Kabul et" derse ikisi hemen arkadaş olur
+// (davet eden, linki gönderirken razı olmuş sayılır) ve davet edene "arkadaşın oldu" bildirimi gider.
+// Eski sürümden kalan bekleyen istekler için onay ekranı Arkadaşlar sekmesinde durur.
 import { Linking, Share } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { ensureSession, supabase } from '@/lib/supabase';
 import { track } from '@/lib/analytics';
@@ -22,10 +24,20 @@ export type CreateInviteResult =
   | { ok: false; error: 'no_profile' | 'limit_me' | 'daily_limit' | 'busy' | 'network' };
 
 export type RequestInviteResult =
-  | { ok: true; name: string }
+  | { ok: true; name: string; friendId: string }
   | {
       ok: false;
-      error: 'no_profile' | 'too_many' | 'not_found' | 'full' | 'self' | 'already' | 'pending' | 'limit_me' | 'network';
+      error:
+        | 'no_profile'
+        | 'too_many'
+        | 'not_found'
+        | 'full'
+        | 'self'
+        | 'already'
+        | 'pending'
+        | 'limit_me'
+        | 'limit_them'
+        | 'network';
     };
 
 export type DecideResult =
@@ -106,7 +118,8 @@ export async function requestInvite(rawCode: string): Promise<RequestInviteResul
   if (!isValidCode(code)) return { ok: false, error: 'not_found' };
   try {
     if (!(await ensureSession())) return { ok: false, error: 'network' };
-    const { data, error } = await supabase.rpc('request_invite', { p_code: code });
+    // Kabul: sunucu isteği oluşturur ve davet eden adına onaylar, ikisi hemen arkadaş olur
+    const { data, error } = await supabase.rpc('accept_invite', { p_code: code });
     if (error || !data) return { ok: false, error: 'network' };
     if (data.error) {
       track('invite_request', { result: data.error });
@@ -114,11 +127,13 @@ export async function requestInvite(rawCode: string): Promise<RequestInviteResul
     }
     track('invite_request', { result: 'ok' });
     if (data.request_id) {
+      // Davet edene "… davetinle arkadaşın oldu" bildirimi
       supabase.functions
-        .invoke('sor', { body: { action: 'invite_joined', requestId: data.request_id } })
+        .invoke('sor', { body: { action: 'invite_friend', requestId: data.request_id } })
         .catch(() => {});
     }
-    return { ok: true, name: data.name || '' };
+    if (data.friend_id) await markFriendsSeen([data.friend_id]);
+    return { ok: true, name: data.name || '', friendId: data.friend_id || '' };
   } catch {
     return { ok: false, error: 'network' };
   }
@@ -238,4 +253,39 @@ export function onInvitesChanged(cb: () => void): () => void {
   return () => {
     changeListeners.delete(cb);
   };
+}
+
+// ---- Yeni arkadaş uyarısı ----
+// Bildirim kapalı olsa bile Arkadaşlar sekmesinde "🎉 Berza arkadaşın oldu" gösterebilmek için
+// daha önce görülen arkadaşları telefonda tutarız. İlk açılışta mevcut liste sessizce kaydedilir.
+const SEEN_KEY = 'friends_seen_v1';
+
+async function loadSeen(): Promise<string[] | null> {
+  try {
+    const raw = await AsyncStorage.getItem(SEEN_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function markFriendsSeen(ids: string[]): Promise<void> {
+  const cur = (await loadSeen()) ?? [];
+  const next = Array.from(new Set([...cur, ...ids])).slice(-200);
+  await AsyncStorage.setItem(SEEN_KEY, JSON.stringify(next)).catch(() => {});
+}
+
+// Listeyi görülenlerle karşılaştır: yeni olanları döndür ve hepsini görüldü say
+export async function takeNewFriends(ids: string[]): Promise<string[]> {
+  const seen = await loadSeen();
+  if (seen === null) {
+    await AsyncStorage.setItem(SEEN_KEY, JSON.stringify(ids)).catch(() => {});
+    return [];
+  }
+  const set = new Set(seen);
+  const fresh = ids.filter((id) => !set.has(id));
+  if (fresh.length) await markFriendsSeen(fresh);
+  return fresh;
 }

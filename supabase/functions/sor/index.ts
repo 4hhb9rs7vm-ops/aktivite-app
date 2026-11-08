@@ -2,6 +2,8 @@
 // Uygulama iki iş için çağırır:
 //   { action: 'ask', friendId }  → arkadaşa "Şu an ne yapıyorsun?" bildirimi
 //   { action: 'answer' }         → soru almış kişi aktivite seçti, soranlara "cevap verdi" bildirimi
+//   { action: 'invite_joined', requestId }   → davet koduyla katılan kişi istek gönderdi, davet edene bildirim
+//   { action: 'invite_accepted', requestId } → davet eden isteği onayladı, katılana bildirim
 // Bildirimler Expo'nun ücretsiz bildirim servisiyle gider.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -15,10 +17,14 @@ const TEXT = {
   tr: {
     askBody: (n: string) => `${n} soruyor: Şu an ne yapıyorsun? 👀`,
     answerBody: (n: string) => `${n} cevap verdi. Ne yaptığını gör 👀`,
+    joinedBody: (n: string) => `${n} davetine katıldı 👋 Onaylamak için dokun`,
+    acceptedBody: (n: string) => `${n} isteğini onayladı! Artık arkadaşsınız 🎉`,
   },
   en: {
     askBody: (n: string) => `${n} is asking: What are you doing right now? 👀`,
     answerBody: (n: string) => `${n} answered. See what they're up to 👀`,
+    joinedBody: (n: string) => `${n} joined your invite 👋 Tap to approve`,
+    acceptedBody: (n: string) => `${n} approved your request! You're friends now 🎉`,
   },
 };
 
@@ -171,6 +177,65 @@ async function handleAnswer(me: string): Promise<Response> {
   return reply('ok');
 }
 
+// ---- Davet bildirimleri ----
+// Her istek için her bildirim en fazla bir kez gider (notified_* sütunları).
+// Gece saatinde (karşı tarafın 23:00-09:00) bildirim gitmez; istek uygulamada zaten görünür.
+const INVITE_NOTIFY_WINDOW_MIN = 30; // sadece yeni olaylar için bildirim
+
+function isUuid(v: unknown): v is string {
+  return typeof v === 'string' && /^[0-9a-f-]{36}$/i.test(v);
+}
+
+async function handleInviteJoined(me: string, requestId: unknown): Promise<Response> {
+  if (!isUuid(requestId)) return reply('bad_request', 400);
+  const since = new Date(Date.now() - INVITE_NOTIFY_WINDOW_MIN * 60 * 1000).toISOString();
+  const { data: rq } = await admin
+    .from('invite_requests')
+    .select('id, owner, requester, status, created_at, notified_join_at')
+    .eq('id', requestId)
+    .eq('requester', me)
+    .eq('status', 'pending')
+    .is('notified_join_at', null)
+    .gte('created_at', since)
+    .maybeSingle();
+  if (!rq) return reply('none');
+
+  await admin.from('invite_requests').update({ notified_join_at: new Date().toISOString() }).eq('id', rq.id);
+
+  const token = await getToken(rq.owner as string);
+  if (!token) return reply('no_device');
+  if (isQuiet(token.tz_offset)) return reply('quiet');
+  const name = await displayName(me);
+  const tx = token.lang === 'tr' ? TEXT.tr : TEXT.en;
+  const ok = await push(token, tx.joinedBody(name), 'invite_joined');
+  return reply(ok ? 'ok' : 'no_device');
+}
+
+async function handleInviteAccepted(me: string, requestId: unknown): Promise<Response> {
+  if (!isUuid(requestId)) return reply('bad_request', 400);
+  const since = new Date(Date.now() - INVITE_NOTIFY_WINDOW_MIN * 60 * 1000).toISOString();
+  const { data: rq } = await admin
+    .from('invite_requests')
+    .select('id, owner, requester, status, decided_at, notified_accept_at')
+    .eq('id', requestId)
+    .eq('owner', me)
+    .eq('status', 'accepted')
+    .is('notified_accept_at', null)
+    .gte('decided_at', since)
+    .maybeSingle();
+  if (!rq) return reply('none');
+
+  await admin.from('invite_requests').update({ notified_accept_at: new Date().toISOString() }).eq('id', rq.id);
+
+  const token = await getToken(rq.requester as string);
+  if (!token) return reply('no_device');
+  if (isQuiet(token.tz_offset)) return reply('quiet');
+  const name = await displayName(me);
+  const tx = token.lang === 'tr' ? TEXT.tr : TEXT.en;
+  const ok = await push(token, tx.acceptedBody(name), 'invite_accepted');
+  return reply(ok ? 'ok' : 'no_device');
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return reply('method', 405);
   const jwt = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
@@ -185,5 +250,7 @@ Deno.serve(async (req) => {
 
   if (body?.action === 'ask') return handleAsk(me, body.friendId);
   if (body?.action === 'answer') return handleAnswer(me);
+  if (body?.action === 'invite_joined') return handleInviteJoined(me, body.requestId);
+  if (body?.action === 'invite_accepted') return handleInviteAccepted(me, body.requestId);
   return reply('bad_request', 400);
 });

@@ -5,6 +5,10 @@
 //   seri bozulmaz (ama o gün seriye sayılmaz). Aynı haftada ikinci kaçırılan gün seriyi bozar.
 // - Üyelik: 7 gün seri → Daimi Üye, 14 → Gümüş, 21 → Altın, 30/30 (1. günden kesintisiz) → Kurucu Üye.
 // - Rozetler kalıcıdır: bir kez kazanılan rozet seri bozulsa da gitmez.
+// 1.5.1 (sonradan katılanlar için):
+// - 🌱 Hoş geldin: ilk cevap. 🚀 Kasım Öncüsü: Kasım bitmeden 7 cevap (30 Kasım'da kapanır).
+// - 🔍 Meraklı Kâşif: kaçırılan 5 soruyu arşivden cevapla. Arşiv cevapları seriye sayılmaz, sonuçları değiştirmez.
+// - 🛟 Hediye can: geç katılanın ilk 7 gününde 1 ekstra can.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Lang } from '@/lib/i18n';
 import { istanbulToday, SERIES_LENGTH, SERIES_START } from '@/lib/dailyQuestion';
@@ -15,6 +19,10 @@ const ANSWERS_KEY = 'dq_answers_v1';
 const HISTORY_KEY = 'moment_history_v1';
 const EARNED_KEY = 'badges_earned_v1'; // { badgeId: 'YYYY-MM-DD' }
 const PATH_LEN_KEY = 'path_len_v1'; // yolun uzunluğu (veritabanındaki soru sayısı)
+export const ARCHIVE_KEY = 'dq_archive_v1'; // { 'YYYY-MM-DD': 'a' } arşivden cevaplanan günler
+const PIONEER_END = '2026-11-30'; // Kasım Öncüsü son gün
+const PIONEER_NEED = 7;
+const EXPLORER_NEED = 5;
 
 // Bitmeyen yol: uzunluk veritabanındaki soru sayısından gelir.
 // Aralık soruları eklenince yol kendiliğinden uzar, uygulama güncellemesi gerekmez.
@@ -52,7 +60,10 @@ export type BadgeId =
   | 'night_5'
   | 'daily_7'
   | 'daily_30'
-  | 'ask_1';
+  | 'ask_1'
+  | 'welcome_1'
+  | 'pioneer_nov'
+  | 'explorer_5';
 
 export type TierId = 'tier_7' | 'tier_14' | 'tier_21' | 'tier_30';
 
@@ -154,7 +165,39 @@ export const BADGES: BadgeDef[] = [
     how: { tr: 'Bir arkadaşına "Sor" de', en: 'Ask a friend once' },
     done: { tr: 'Bir arkadaşına "Şu an ne yapıyorsun?" diye sordun.', en: 'You asked a friend what they are up to.' },
   },
+  {
+    id: 'welcome_1',
+    emoji: '🌱',
+    name: { tr: 'Hoş geldin', en: 'Welcome' },
+    how: { tr: 'İlk soruyu cevapla', en: 'Answer your first question' },
+    done: {
+      tr: 'İlk cevabını verdin, yolun başladı. 7 gün üst üste gel, Daimi Üye ol.',
+      en: 'You gave your first answer. Come back 7 days in a row to become a Regular.',
+    },
+    reward: { tr: 'Hediye: ilk haftan için 1 ekstra can 🛟', en: 'Gift: 1 extra life for your first week 🛟' },
+  },
+  {
+    id: 'pioneer_nov',
+    emoji: '🚀',
+    name: { tr: 'Kasım Öncüsü', en: 'November Pioneer' },
+    how: { tr: "Kasım'da 7 cevap", en: '7 answers in November' },
+    done: { tr: 'İlk ayın öncülerindensin. Bu rozet bir daha verilmeyecek.', en: "You're one of the first month's pioneers. This badge won't come back." },
+  },
+  {
+    id: 'explorer_5',
+    emoji: '🔍',
+    name: { tr: 'Meraklı Kâşif', en: 'Curious Explorer' },
+    how: { tr: '5 eski soruyu cevapla', en: 'Answer 5 past questions' },
+    done: { tr: 'Kaçırdığın 5 soruyu keşfettin.', en: 'You explored 5 questions you missed.' },
+  },
 ];
+
+// Süresi geçmiş ve kazanılmamış rozetler listede gösterilmez (ör. Kasım Öncüsü, 30 Kasım'dan sonra)
+export function badgeVisible(id: BadgeId, earned: Record<string, string>, today: string): boolean {
+  if (earned[id]) return true;
+  if (id === 'pioneer_nov') return today <= PIONEER_END;
+  return true;
+}
 
 export const BADGE_BY_ID: Record<BadgeId, BadgeDef> = Object.fromEntries(BADGES.map((b) => [b.id, b])) as Record<
   BadgeId,
@@ -167,7 +210,7 @@ export function badgeName(id: BadgeId, lang: Lang): string {
 }
 
 // ---------------------------------------------------------------- 30 günlük yol
-export type DayStatus = 'answered' | 'joker' | 'missed' | 'today' | 'locked';
+export type DayStatus = 'answered' | 'joker' | 'archived' | 'missed' | 'today' | 'locked';
 export type PathDay = { n: number; date: string; status: DayStatus };
 
 export type Progress = {
@@ -178,6 +221,9 @@ export type Progress = {
   cansLeft: number; // bu haftaki can (0 ya da 1)
   founding: boolean; // 1. günden beri kesintisiz mi (Kurucu Üye yolu)
   answered: number; // toplam cevaplanan gün
+  firstAnswered: number; // ilk cevaplanan günün sırası (0: henüz yok)
+  personalDay: number; // sonradan katılan için "senin kaçıncı günün" (1. günden beri olanlarda 0)
+  missedCount: number; // arşivden cevaplanabilecek kaçırılmış gün sayısı
   tier: TierId | null; // ulaşılan en yüksek üyelik (kalıcı rozetlerden)
   next: { id: TierId; left: number } | null; // bir sonraki üyelik ve kalan gün
 };
@@ -199,10 +245,12 @@ async function readJson<T>(key: string, fallback: T): Promise<T> {
 export function computePath(
   answers: Record<string, string>,
   today: string,
-  total: number = SERIES_LENGTH
+  total: number = SERIES_LENGTH,
+  archive: Record<string, string> = {}
 ): Omit<Progress, 'tier' | 'next'> {
   const days: PathDay[] = [];
   const jokerUsed: boolean[] = [];
+  let giftUsed = false; // geç katılana ilk 7 günde 1 hediye can
   let chain = 0;
   let best = 0;
   let answered = 0;
@@ -229,11 +277,12 @@ export function computePath(
       days.push({ n: i, date, status: 'today' }); // bugün henüz cevap yok: seriyi bozmaz
       continue;
     }
-    // Geçmişte kaçırılmış gün
+    // Geçmişte kaçırılmış gün (arşivden cevaplandıysa yolda farklı görünür, seriye sayılmaz)
+    const missedStatus: DayStatus = archive[date] ? 'archived' : 'missed';
     if (!firstAnswered) {
       // Kullanıcı henüz başlamamıştı: can harcanmaz, seri zaten 0
       founding = false;
-      days.push({ n: i, date, status: 'missed' });
+      days.push({ n: i, date, status: missedStatus });
       continue;
     }
     if (!jokerUsed[week]) {
@@ -241,20 +290,28 @@ export function computePath(
       days.push({ n: i, date, status: 'joker' });
       continue;
     }
+    if (!giftUsed && firstAnswered > 1 && i - firstAnswered < 7) {
+      giftUsed = true;
+      days.push({ n: i, date, status: 'joker' });
+      continue;
+    }
     chain = 0;
     founding = false;
-    days.push({ n: i, date, status: 'missed' });
+    days.push({ n: i, date, status: missedStatus });
   }
 
   const started = today >= SERIES_START;
   let todayIdx = 0;
   for (const d of days) if (d.date <= today) todayIdx = d.n;
   const curWeek = Math.floor(Math.max(0, todayIdx - 1) / 7);
-  const cansLeft = started ? (jokerUsed[curWeek] ? 0 : 1) : 1;
+  const giftOpen = firstAnswered > 1 && !giftUsed && todayIdx - firstAnswered < 7;
+  const cansLeft = (started ? (jokerUsed[curWeek] ? 0 : 1) : 1) + (giftOpen ? 1 : 0);
   // Kurucu yolu: 1. gün cevaplanmış olmalı (ya da bugün 1. gün ve henüz cevap yok)
   founding = founding && (firstAnswered === 1 || (firstAnswered === 0 && todayIdx <= 1 && started));
 
-  return { days, started, streak: chain, bestStreak: best, cansLeft, founding, answered };
+  const personalDay = firstAnswered > 1 ? todayIdx - firstAnswered + 1 : 0;
+  const missedCount = days.filter((d) => d.status === 'missed').length;
+  return { days, started, streak: chain, bestStreak: best, cansLeft, founding, answered, firstAnswered, personalDay, missedCount };
 }
 
 // ---------------------------------------------------------------- rozet kontrolü
@@ -298,7 +355,12 @@ async function askTotal(): Promise<number> {
   }
 }
 
-async function computeEarned(p: Omit<Progress, 'tier' | 'next'>): Promise<BadgeId[]> {
+async function computeEarned(
+  p: Omit<Progress, 'tier' | 'next'>,
+  answers: Record<string, string>,
+  archive: Record<string, string>,
+  earned: Record<string, string>
+): Promise<BadgeId[]> {
   const [sent, mc, daily, asks] = await Promise.all([sentSelamTotal(), momentCounts(), momentBestStreak(), askTotal()]);
   const out: BadgeId[] = [];
   if (p.bestStreak >= 7) out.push('tier_7');
@@ -314,6 +376,11 @@ async function computeEarned(p: Omit<Progress, 'tier' | 'next'>): Promise<BadgeI
   if (daily >= 7) out.push('daily_7');
   if (daily >= 30) out.push('daily_30');
   if (asks >= 1) out.push('ask_1');
+  // Hoş geldin: sadece yeni başlayanlara (eski kullanıcılar güncellemeden sonra durup dururken almasın)
+  if (p.answered >= 1 && (p.answered <= 3 || earned.welcome_1)) out.push('welcome_1');
+  const novAnswers = Object.keys(answers).filter((d) => d >= SERIES_START && d <= PIONEER_END).length;
+  if (novAnswers >= PIONEER_NEED) out.push('pioneer_nov');
+  if (Object.keys(archive).length >= EXPLORER_NEED) out.push('explorer_5');
   return out;
 }
 
@@ -337,7 +404,8 @@ export async function getTier(): Promise<TierId | null> {
 // Yol + rozetler (ekranlar için)
 export async function getProgress(): Promise<Progress> {
   const answers = await readJson<Record<string, string>>(ANSWERS_KEY, {});
-  const base = computePath(answers, istanbulToday(), await getPathLength());
+  const archive = await readJson<Record<string, string>>(ARCHIVE_KEY, {});
+  const base = computePath(answers, istanbulToday(), await getPathLength(), archive);
   const earned = await readEarned();
   const tier = tierFrom(earned);
   let next: Progress['next'] = null;
@@ -355,6 +423,70 @@ export async function getProgress(): Promise<Progress> {
     break;
   }
   return { ...base, tier, next };
+}
+
+// ---------------------------------------------------------------- arşiv (kaçırılan sorular)
+export type ArchiveResult = { key: string; pct: number };
+export type ArchiveItem = {
+  questionId: number;
+  date: string;
+  seriesDay: number | null;
+  questionTr: string;
+  questionEn: string | null;
+  options: { key: string; tr: string; en?: string }[];
+  myAnswer: string | null;
+  answeredLive: boolean;
+  results: ArchiveResult[]; // dünya sonuçları
+};
+
+export async function fetchArchive(): Promise<ArchiveItem[] | null> {
+  try {
+    if (!(await ensureSession())) return null;
+    const { data, error } = await supabase.rpc('get_archive');
+    if (error || !Array.isArray(data)) return null;
+    const local = await readJson<Record<string, string>>(ARCHIVE_KEY, {});
+    let changed = false;
+    const items: ArchiveItem[] = data.map((r: any) => {
+      const results: ArchiveResult[] = (Array.isArray(r.results) ? r.results : [])
+        .filter((x: any) => x && x.scope === 'world')
+        .map((x: any) => ({ key: String(x.option_key), pct: Number(x.pct) || 0 }));
+      // Sunucudaki arşiv cevaplarını telefona eşitle (yeniden kurulumda kaybolmasın)
+      if (r.my_answer && !r.answered_live && !local[r.day_date]) {
+        local[r.day_date] = r.my_answer;
+        changed = true;
+      }
+      return {
+        questionId: Number(r.question_id),
+        date: String(r.day_date),
+        seriesDay: r.series_day ?? null,
+        questionTr: r.question_tr ?? '',
+        questionEn: r.question_en ?? null,
+        options: Array.isArray(r.options) ? r.options : [],
+        myAnswer: r.my_answer ?? null,
+        answeredLive: !!r.answered_live,
+        results,
+      };
+    });
+    if (changed) await AsyncStorage.setItem(ARCHIVE_KEY, JSON.stringify(local)).catch(() => {});
+    return items;
+  } catch {
+    return null;
+  }
+}
+
+export async function answerArchive(item: ArchiveItem, optionKey: string): Promise<boolean> {
+  try {
+    if (!(await ensureSession())) return false;
+    const { data, error } = await supabase.rpc('answer_archive', { p_question_id: item.questionId, p_option: optionKey });
+    if (error || !data || data.error) return false;
+    const local = await readJson<Record<string, string>>(ARCHIVE_KEY, {});
+    local[item.date] = optionKey;
+    await AsyncStorage.setItem(ARCHIVE_KEY, JSON.stringify(local)).catch(() => {});
+    setTimeout(() => checkBadges().catch(() => {}), 600);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------- yeni rozet → kutlama
@@ -383,9 +515,10 @@ export async function checkBadges(): Promise<BadgeId[]> {
   checking = true;
   try {
     const answers = await readJson<Record<string, string>>(ANSWERS_KEY, {});
-    const base = computePath(answers, istanbulToday(), await getPathLength());
-    const now = await computeEarned(base);
+    const archive = await readJson<Record<string, string>>(ARCHIVE_KEY, {});
+    const base = computePath(answers, istanbulToday(), await getPathLength(), archive);
     const earned = await readEarned();
+    const now = await computeEarned(base, answers, archive, earned);
     const fresh = now.filter((id) => !earned[id]);
     if (fresh.length === 0) return [];
     const day = istanbulToday();

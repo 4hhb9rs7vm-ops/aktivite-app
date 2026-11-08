@@ -117,6 +117,7 @@ import { SelamCard } from '@/components/SelamCard';
 import { checkBadges } from '@/lib/badges';
 import { fetchLatestSelamSummary, onSelamChanged, SelamSummary } from '@/lib/selam';
 import { answerAsks, onOpenTab } from '@/lib/ask';
+import { isOverlayBusy, setOverlayBusy } from '@/lib/overlay';
 import {
   deleteFriendData,
   FRIEND_MUTES_KEY,
@@ -127,7 +128,7 @@ import {
 } from '@/lib/friends';
 
 // Seçim kilidi: kullanıcı yarım saatte bir yeni an seçebilir.
-// Not: kişinin istatistikte sayıldığı süre (şu an 60 dk) Supabase fonksiyonlarında ayarlanır, burada değil.
+// Not: kişinin istatistikte sayıldığı süre (şu an 3 saat) Supabase fonksiyonlarında ayarlanır, burada değil.
 const SESSION_MS = 30 * 60 * 1000;
 // Gece modu: 23:00 – 05:00 arası daha yumuşak mesajlar gösterilir
 function isNight(d = new Date()) {
@@ -142,6 +143,9 @@ const FRIENDS_TIP_KEY = 'friends_tip_seen_v1';
 // 1.3.0 (9): ilk açılışta "Hoş geldin" kartı ve ilk sonuçta paylaş ipucu (cihaz başına bir kez)
 const WELCOME_KEY = 'welcome_seen_v2';
 const SHARE_TIP_KEY = 'share_tip_seen_v1';
+// 1.5.1: "Bu oran hikâyelik!" ipucu, gerçek bir oran çıktığında ilk 3 kez (günde en fazla 1)
+const SHARE_TIP2_KEY = 'share_tip_v2'; // { n: gösterim sayısı, day: 'YYYY-MM-DD' }
+const SHARE_TIP_MAX = 3;
 
 const PRIVACY_URLS: Record<Lang, string> = {
   tr: 'https://4hhb9rs7vm-ops.github.io/aktivite-app/gizlilik/',
@@ -387,7 +391,7 @@ const ACTIVITIES: Activity[] = [
 const ACTIVITIES_BY_ID: Record<string, Activity> = Object.fromEntries(ACTIVITIES.map((a) => [a.id, a]));
 
 const FILTERS = [
-  { id: 'world', label: 'Dünya' },
+  { id: 'world', label: 'Herkes' },
   { id: 'campus', label: 'Kampüs' },
   { id: 'country', label: 'Ülke' },
   { id: 'city', label: 'Şehir' },
@@ -395,6 +399,7 @@ const FILTERS = [
   { id: 'gender', label: 'Cinsiyet' },
 ] as const;
 
+// 1.5.1: 15-17 yaş grubu eklendi (uygulama 15 yaş ve üstü)
 const AGE_RANGES = ['18-24', '25-34', '35-44', '45-54', '55+'];
 
 const CITIES = [
@@ -1167,8 +1172,8 @@ function FilterSegment({
   const title = lang === 'tr' ? 'Kimlerle karşılaştıralım?' : 'Compare with…';
   const labels: Record<FilterId, string> =
     lang === 'tr'
-      ? { world: 'Dünya', country: 'Ülke', city: 'Şehir', age: 'Yaş', gender: 'Cinsiyet', campus: 'Kampüs' }
-      : { world: 'World', country: 'Country', city: 'City', age: 'Age', gender: 'Gender', campus: 'Campus' };
+      ? { world: 'Herkes', country: 'Ülke', city: 'Şehir', age: 'Yaş', gender: 'Cinsiyet', campus: 'Kampüs' }
+      : { world: 'Everyone', country: 'Country', city: 'City', age: 'Age', gender: 'Gender', campus: 'Campus' };
 
   return (
     <View>
@@ -1594,11 +1599,11 @@ function GuessScreen({
           <Text style={gs.question}>
             {activity.mood
               ? tr
-                ? 'Sence dünyada şu an kaç kişi seninle aynı durumda?'
-                : 'How many people in the world feel the same as you right now?'
+                ? 'Sence şu an kaç kişi seninle aynı durumda?'
+                : 'How many people feel the same as you right now?'
               : tr
-                ? 'Sence dünyada şu an kaç kişi seninle aynı şeyi yapıyor?'
-                : 'How many people in the world are doing the same right now?'}
+                ? 'Sence şu an kaç kişi seninle aynı şeyi yapıyor?'
+                : 'How many people are doing the same right now?'}
           </Text>
           <View style={[gs.kickerPill, { backgroundColor: '#ffffff' }]}>
             <Ionicons name="help-circle" size={18} color={fg} />
@@ -1902,11 +1907,11 @@ function ShareTipOverlay({
         {/* Balon: düğmenin hemen üstünde */}
         <View style={[ws.tipArea, { height: Math.max(0, rect.y - 14) }]} pointerEvents="box-none">
           <Pressable style={ws.tip} onPress={() => {}}>
-            <Text style={ws.tipTitle}>{tr ? '📸 Bunu hikâyende paylaş!' : '📸 Share this on your story!'}</Text>
+            <Text style={ws.tipTitle}>{tr ? '📸 Bu oran hikâyelik!' : '📸 This one is story-worthy!'}</Text>
             <Text style={ws.tipText}>
               {tr
-                ? "Sonucun, Instagram'a hazır eğlenceli bir karta dönüşür. Arkadaşların da kaçta kaç olduklarını merak etsin."
-                : 'Your result turns into a fun card ready for Instagram. Let your friends wonder where they stand too.'}
+                ? 'Instagram hikâyende paylaş, arkadaşların da "ben ne yapıyorum?" desin. Hazır kart bir dokunuşta.'
+                : 'Share it on your Instagram story and get your friends asking "what am I doing?" The card is one tap away.'}
             </Text>
             <Pressable style={ws.tipOk} onPress={onClose} hitSlop={8} accessibilityRole="button">
               <Text style={ws.tipOkText}>{tr ? 'Tamam' : 'OK'}</Text>
@@ -2251,22 +2256,31 @@ export default function HomeScreen() {
     setTimeout(() => Share.share({ message }).catch(() => {}), 450);
   }
 
-  // Paylaş ipucu: ilk sonuç ekranında (oran ya da "henüz veri yok") bir kez.
+  // Paylaş ipucu ("Bu oran hikâyelik!"): gerçek bir oran çıktığında ilk 3 kez, günde en fazla bir kez.
   // Filtre ipucu ya da bildirim kartı açıksa onların bitmesini bekler.
-  const shareBtnVisible =
-    !!selected && !guessing && (ratio !== null || ratioError) && !loading;
+  const shareBtnVisible = !!selected && !guessing && ratio !== null && !ratioError && !loading;
   useEffect(() => {
     if (!shareBtnVisible || filterHint || notifPrompt || sharePreviewOpen || pendingShare) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    AsyncStorage.getItem(SHARE_TIP_KEY)
-      .then((seen) => {
-        if (seen || cancelled) return;
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    AsyncStorage.getItem(SHARE_TIP2_KEY)
+      .then((raw) => {
+        let st = { n: 0, day: '' };
+        try {
+          if (raw) st = { ...st, ...JSON.parse(raw) };
+        } catch {}
+        if (cancelled || st.n >= SHARE_TIP_MAX || st.day === today) return;
         timer = setTimeout(() => {
           if (cancelled || !shareBtnRef.current) return;
+          // Başka bir pencere (rozet kutlaması, Günün Sorusu) açıksa bu sefer gösterme
+          if (isOverlayBusy('sharetip')) return;
           shareBtnRef.current.measureInWindow((x, y, w, h) => {
-            if (cancelled || !w || !h) return;
+            if (cancelled || !w || !h || isOverlayBusy('sharetip')) return;
+            AsyncStorage.setItem(SHARE_TIP2_KEY, JSON.stringify({ n: st.n + 1, day: today })).catch(() => {});
             AsyncStorage.setItem(SHARE_TIP_KEY, '1').catch(() => {});
+            track('insta_tip_shown', { n: st.n + 1 });
             setShareTipRect({ x, y, w, h });
           });
         }, 1200);
@@ -2277,6 +2291,10 @@ export default function HomeScreen() {
       if (timer) clearTimeout(timer);
     };
   }, [shareBtnVisible, filterHint, notifPrompt, sharePreviewOpen, pendingShare]);
+
+  useEffect(() => {
+    setOverlayBusy('sharetip', !!shareTipRect);
+  }, [shareTipRect]);
 
   function closeShareTip() {
     tap(true);
@@ -2339,6 +2357,8 @@ export default function HomeScreen() {
   useEffect(() => {
     return onOpenTab((target) => {
       if (target === 'friends' && !FRIENDS_TAB_ENABLED) return;
+      // Davet linki ya da arkadaş bildirimi: an ekranı açıksa önce ana ekrana dön (an kilidi korunur)
+      if (target === 'friends') goHome();
       setTab(target);
     });
   }, []);
@@ -2608,7 +2628,7 @@ export default function HomeScreen() {
     const keepFriends = friendsSetup && !deleteFriends;
     await AsyncStorage.multiRemove(['profile', 'consent', HISTORY_KEY, ME_KEY]);
     // Sıfırlanınca ilk açılış deneyimi de baştan: hoş geldin kartı, paylaş ipucu, filtre ipucu
-    await AsyncStorage.multiRemove([WELCOME_KEY, SHARE_TIP_KEY, 'filterHintSeen']);
+    await AsyncStorage.multiRemove([WELCOME_KEY, SHARE_TIP_KEY, SHARE_TIP2_KEY, 'filterHintSeen']);
     setWelcomeCheck((n) => n + 1);
     if (friendsSetup && deleteFriends) {
       try {
@@ -3289,7 +3309,7 @@ export default function HomeScreen() {
               <View style={hs.topNowRow}>
                 <Ionicons name="globe-outline" size={15} color="#AFC0E8" />
                 <Text style={hs.topNowText} numberOfLines={1}>
-                  {lang === 'tr' ? 'Şu an dünyada en çok: ' : 'Most common right now: '}
+                  {lang === 'tr' ? 'Şu an en çok: ' : 'Most common right now: '}
                   <Text style={hs.topNowStrong}>
                     {activityName(topNow.id, lang)} · {formatPct(topNow.pct, lang)}
                   </Text>

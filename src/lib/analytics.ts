@@ -28,7 +28,15 @@ export type EventName =
   | 'badge_shared'
   | 'ask_sent'
   | 'ask_setting'
-  | 'ask_tap';
+  | 'ask_tap'
+  | 'invite_created'
+  | 'invite_shared'
+  | 'invite_request'
+  | 'invite_decided'
+  | 'invite_link_open'
+  | 'app_share'
+  | 'insta_tip_shown'
+  | 'archive_answered';
 
 type Props = Record<string, string | number | boolean | null>;
 

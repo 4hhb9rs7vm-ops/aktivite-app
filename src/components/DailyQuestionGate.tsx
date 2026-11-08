@@ -54,6 +54,7 @@ import {
 import { DailyResultReveal } from '@/components/DailyResultReveal';
 import { scheduleResultNotification } from '@/lib/notifications';
 import { track } from '@/lib/analytics';
+import { setOverlayBusy } from '@/lib/overlay';
 import { checkBadges } from '@/lib/badges';
 
 // index.tsx'teki açılış ekranı 3,5 sn sürüyor. Kart, ana ekran kısa bir an göründükten sonra gelsin.
@@ -81,7 +82,7 @@ const TEXT = {
   tr: {
     intro: 'Başlamadan önce kısa bir soru',
     label: 'GÜNÜN SORUSU',
-    day: (n: number) => `Gün ${n}/${SERIES_LENGTH}`,
+    day: (n: number) => `Gün ${n}`,
     hint: "Herkese aynı soru. Sonuç akşam 21:00'de.",
     skip: 'Bugün geç',
     snooze: '1 hafta sorma',
@@ -97,7 +98,7 @@ const TEXT = {
   en: {
     intro: 'A quick question before you start',
     label: 'QUESTION OF THE DAY',
-    day: (n: number) => `Day ${n}/${SERIES_LENGTH}`,
+    day: (n: number) => `Day ${n}`,
     hint: 'Same question for everyone. Results at 9 pm.',
     skip: 'Skip today',
     snooze: "Don't ask for a week",
@@ -117,6 +118,11 @@ export function DailyQuestionGate() {
   const insets = useSafeAreaInsets();
 
   const [visible, setVisible] = useState(false);
+  // Açıkken rozet kutlaması beklesin (iPhone'da iki pencere çakışıp ekranı kilitliyordu)
+  useEffect(() => {
+    setOverlayBusy('gate', visible);
+    return () => setOverlayBusy('gate', false);
+  }, [visible]);
   const [question, setQuestion] = useState<DailyQuestion | null>(null);
   const [lang, setLang] = useState<Lang>('tr');
   const [phase, setPhase] = useState<Phase>('question');

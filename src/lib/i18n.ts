@@ -230,7 +230,7 @@ function activityRatioLine(filter: string, value: string | null | undefined, lan
           return 'Şu an cinsiyetini belirtmemeyi tercih edenler arasında seninle aynı şeyi yapanların oranı';
         return `Şu an ${value?.toLocaleLowerCase('tr-TR')} kullanıcılar arasında seninle aynı şeyi yapanların oranı`;
       default:
-        return 'Şu an dünyada seninle aynı şeyi yapanların oranı';
+        return 'Şu an uygulamada seninle aynı şeyi yapanların oranı';
     }
   }
   switch (filter) {
@@ -249,7 +249,7 @@ function activityRatioLine(filter: string, value: string | null | undefined, lan
         ? 'Share of women doing the same as you right now'
         : 'Share of men doing the same as you right now';
     default:
-      return 'Share of people worldwide doing the same as you right now';
+      return 'Share of people on the app doing the same as you right now';
   }
 }
 
@@ -269,7 +269,7 @@ export const STRINGS = {
     sectionMood: 'Ruh halim',
     resetLink: 'Kayıtlı bilgilerimi sıfırla',
     privacyLink: 'Gizlilik politikası',
-    filters: { world: 'Dünya', country: 'Ülke', city: 'Şehir', age: 'Yaş', gender: 'Cinsiyet' },
+    filters: { world: 'Herkes', country: 'Ülke', city: 'Şehir', age: 'Yaş', gender: 'Cinsiyet' },
     pickCountry: 'Hangi ülkede yaşıyorsun?',
     searchCountry: 'Ülke ara',
     pickCity: 'Hangi ilde yaşıyorsun?',
@@ -281,7 +281,7 @@ export const STRINGS = {
     consentP1:
       'Ülke, yaş aralığı, şehir, cinsiyet ve öğrenciysen üniversite bilgilerin, seçtiğin aktivite ile birlikte anonim olarak sunucuya gönderilir. Adın, e-postan ya da telefon numaran istenmez.',
     consentP2:
-      'Bilgilerin yalnızca oranları hesaplamak için kullanılır ve aktivitenin geçerli olduğu 60 dakika boyunca hesaba katılır. İstediğin zaman Ben sekmesinden silebilirsin.',
+      'Bilgilerin yalnızca oranları hesaplamak için kullanılır ve aktivitenin geçerli olduğu 3 saat boyunca hesaba katılır. İstediğin zaman Ben sekmesinden silebilirsin.',
     readPrivacy: 'Gizlilik politikasını oku',
     accept: 'Kabul ediyorum',
     notNow: 'Şimdi değil',
@@ -340,7 +340,7 @@ export const STRINGS = {
     sectionMood: 'My mood',
     resetLink: 'Reset my saved info',
     privacyLink: 'Privacy policy',
-    filters: { world: 'World', country: 'Country', city: 'City', age: 'Age', gender: 'Gender' },
+    filters: { world: 'Everyone', country: 'Country', city: 'City', age: 'Age', gender: 'Gender' },
     pickCountry: 'Which country do you live in?',
     searchCountry: 'Search country',
     pickCity: 'Which city do you live in?',
@@ -352,7 +352,7 @@ export const STRINGS = {
     consentP1:
       'Your country, age range, city, gender and, if you are a student, your university are sent anonymously to our server together with the activity you picked. We never ask for your name, email or phone number.',
     consentP2:
-      'This info is only used to calculate the percentages, and only for the 60 minutes your activity is active. You can delete it anytime from the Me tab.',
+      'This info is only used to calculate the percentages, and only for the 3 hours your activity is active. You can delete it anytime from the Me tab.',
     readPrivacy: 'Read the privacy policy',
     accept: 'I agree',
     notNow: 'Not now',

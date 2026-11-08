@@ -76,7 +76,7 @@
       document.getElementById('codebox').classList.add('hidden');
     }
 
-    var appLink = 'aktiviteapp://davet' + (code ? '?c=' + code : '');
+    var appLink = 'aktiviteapp://davet' + (code ? '?c=' + code + (name ? '&n=' + encodeURIComponent(name) : '') : '');
     var open = document.getElementById('open');
     open.href = appLink;
     open.addEventListener('click', function () {

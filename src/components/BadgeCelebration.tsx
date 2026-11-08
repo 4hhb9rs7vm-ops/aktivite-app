@@ -9,6 +9,7 @@ import { captureRef } from 'react-native-view-shot';
 import { Lang, loadLang } from '@/lib/i18n';
 import { BADGE_BY_ID, BadgeId, onNewBadges } from '@/lib/badges';
 import { track } from '@/lib/analytics';
+import { setOverlayBusy, whenOverlayFree } from '@/lib/overlay';
 
 const NAVY = '#0F2A52';
 const AMBER = '#FBBF24';
@@ -77,8 +78,13 @@ export function BadgeCelebration() {
       setVisible(false);
       return;
     }
-    // Diğer ekranlar (soru kartı vb.) kapanmış olsun diye kısa bir bekleme
+    // Diğer pencereler (soru kartı, paylaş ipucu vb.) kapanmadan açılma: iPhone'da ekran kilitleniyordu (1.5.1)
+    let cancelWait = () => {};
     const t = setTimeout(() => {
+      cancelWait = whenOverlayFree(() => show(), 'badge');
+    }, 500);
+    function show() {
+      setOverlayBusy('badge', true);
       setVisible(true);
       scale.setValue(0.6);
       spin.setValue(0);
@@ -88,9 +94,16 @@ export function BadgeCelebration() {
       ]).start();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       track('badge_earned', { id: current });
-    }, 500);
-    return () => clearTimeout(t);
+    }
+    return () => {
+      clearTimeout(t);
+      cancelWait();
+    };
   }, [current]);
+
+  useEffect(() => {
+    if (!visible) setOverlayBusy('badge', false);
+  }, [visible]);
 
   function next() {
     setVisible(false);

@@ -2,13 +2,17 @@
 // sessize alma, arkadaşlıktan çıkarma ve şikayet. Arkadaşlar sadece birbirinin ŞU ANKİ anını görür.
 // 1.5.0: "Sor" düğmesi (şu an bir an seçmemiş arkadaşa "Şu an ne yapıyorsun?" bildirimi) ve
 // listenin altında "Arkadaşlarım bana sorabilsin" ayarı.
+// 1.5.1: link / kod ile davet (uzaktaki arkadaş). Kodu kullanan kişi istek gönderir,
+// davet eden onaylarsa arkadaş olurlar. Bekleyen istekler ve aktif davet listenin üstünde.
 import { ComponentType, ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   AppState,
+  KeyboardAvoidingView,
   Linking,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -38,7 +42,31 @@ import {
 } from '@/lib/friends';
 import { checkDisplayName, cleanDisplayName, Me, NAME_MAX, nameError, nameLength } from '@/lib/me';
 import { Avatar, QrSheet } from '@/components/QrSheet';
+import { whenOverlayFree } from '@/lib/overlay';
 import { AskResult, getAllowAsks, recentAsks, sendAsk, setAllowAsks } from '@/lib/ask';
+import {
+  cancelSentRequest,
+  cleanCode,
+  createInvite,
+  CreateInviteResult,
+  decideInviteRequest,
+  enableInviteNotifications,
+  getInviteRequests,
+  getMyInvites,
+  getSentRequests,
+  Invite,
+  inviteMessage,
+  InviteRequest,
+  isValidCode,
+  onInviteCode,
+  onInvitesChanged,
+  requestInvite,
+  RequestInviteResult,
+  revokeInvite,
+  SentRequest,
+  shareInviteOther,
+  shareInviteWhatsApp,
+} from '@/lib/invite';
 
 const BG = '#F4F5F7';
 const INK = '#16161A';
@@ -58,8 +86,9 @@ export type ActivityInfo = {
 const T = {
   tr: {
     title: 'Arkadaşlar',
-    lead: 'Arkadaşlarının şu anki anları. Sadece yan yana eşleştiğin kişiler burada.',
+    lead: 'Arkadaşlarının şu anki anları. Sadece senin onayladığın kişiler burada.',
     qr: 'QR ile ekle',
+    link: 'Link ile davet et',
     setupTitle: 'Önce iki küçük adım',
     setupText: 'Arkadaşların sadece şu anki anını görür. Sohbet yok, geçmiş yok.',
     step1: '1. Görünen adını seç',
@@ -71,7 +100,7 @@ const T = {
     start: 'Kabul et ve devam et',
     ruleMissing: 'Devam etmek için kuralı onayla.',
     emptyTitle: 'Henüz arkadaşın yok',
-    emptyText: 'Bir arkadaşınla yan yana gel, biriniz kodunu göstersin, diğeri okutsun. Hepsi bu.',
+    emptyText: 'Yan yanaysanız QR okutun. Uzaktaysa ona davet linki gönder.',
     noMoment: 'Şu an bir an seçmedi',
     moodHidden: 'Ruh halini gizli tutuyor',
     same: 'Seninle aynı',
@@ -84,7 +113,7 @@ const T = {
     remove: 'Arkadaşlıktan çıkar',
     removeSub: (_n: string) => 'İkinizin listesinden de anında silinir. Karşı tarafa bildirim gitmez.',
     removeAsk: (n: string) => `${n} çıkarılsın mı?`,
-    removeAskText: 'İkinizin listesinden de silinir. Tekrar eklemek için yan yana QR okutmanız gerekir.',
+    removeAskText: 'İkinizin listesinden de silinir. Tekrar eklemek için QR ya da davet linki gerekir.',
     removeYes: 'Çıkar',
     report: 'Şikayet et',
     reportSub: (n: string) => `Bir neden seçersin, ${n} listenden çıkarılır.`,
@@ -114,11 +143,76 @@ const T = {
     } as Record<Exclude<AskResult, 'ok' | 'not_friend' | 'network'>, (n: string) => string>,
     allowTitle: 'Arkadaşlarım bana sorabilsin',
     allowSub: '"Şu an ne yapıyorsun?" bildirimi. Bir kişiye günde en fazla 3 soru, gece gelmez.',
+    // Davet
+    requestsHead: (n: number) => `BEKLEYEN İSTEKLER · ${n}`,
+    requestSub: (ago: string) => `Davetine katıldı · ${ago}`,
+    approve: 'Onayla',
+    approved: (n: string) => `${n} artık arkadaşın 🎉`,
+    rejectAsk: (n: string) => `${n} reddedilsin mi?`,
+    rejectText: 'Karşı tarafa bildirim gitmez.',
+    rejectYes: 'Reddet',
+    activeHead: 'AKTİF DAVETİN',
+    sentHead: (n: number) => `GÖNDERDİĞİN İSTEKLER · ${n}`,
+    sentSub: (ago: string) => `Onay bekleniyor · ${ago}`,
+    cancelReqAsk: 'İstek iptal edilsin mi?',
+    cancelReqText: (n: string) => `${n} isteğini artık görmeyecek.`,
+    cancelReqYes: 'İsteği iptal et',
+    activeTitle: (u: number, m: number) => `${u} / ${m} kişi katıldı`,
+    activeSub: (left: string) => `${left} geçerli`,
+    share: 'Paylaş',
+    revoke: 'İptal',
+    revokeAsk: 'Davet iptal edilsin mi?',
+    revokeText: 'Bu kod artık çalışmaz. Gelmiş istekler listende kalır.',
+    friendsHead: 'ARKADAŞLARIN',
+    haveCode: 'Davet kodum var',
+    inviteReady: 'Davetin hazır 🎉',
+    inviteReadySub: 'Linki gönder ya da kodu söyle.\n24 saat geçerli · en fazla 10 kişi',
+    inviteCodeLabel: 'DAVET KODU',
+    sendWhatsApp: "WhatsApp'ta gönder",
+    sendOther: 'Başka yolla paylaş',
+    inviteNote: 'Katılanlar sana istek olarak düşer.\nSen onaylamadan kimse arkadaşın olmaz.',
+    inviteErr: {
+      no_profile: 'Önce görünen adını seç.',
+      limit_me: 'Arkadaş sınırına ulaştın (50).',
+      daily_limit: 'Bugün yeterince davet oluşturdun. Yarın tekrar dene.',
+      busy: 'Şu an kod üretilemedi. Biraz sonra tekrar dene.',
+      network: 'Bağlantı kurulamadı. İnternetini kontrol edip tekrar dene.',
+    } as Record<Exclude<CreateInviteResult, { ok: true }>['error'], string>,
+    codeTitle: 'Davet kodun var mı?',
+    codeSub: 'Arkadaşının gönderdiği 4 haneli kodu yaz (ör. K472).',
+    codeSend: 'İstek gönder',
+    codeHint: 'Yanlış kodu çok kez denersen 1 saat beklersin.',
+    ownCodeTitle: 'Bu senin davet kodun 🙂',
+    ownCodeText: 'Linki arkadaşına gönder. O açınca sana istek gelir, sen onaylarsın.',
+    codeErr: {
+      no_profile: 'Önce görünen adını seç.',
+      too_many: 'Çok fazla deneme yaptın. 1 saat sonra tekrar dene.',
+      not_found: 'Bu kod bulunamadı ya da süresi doldu.',
+      full: 'Bu davet doldu. Arkadaşından yeni bir kod iste.',
+      self: 'Bu senin kendi davet kodun.',
+      already: 'Zaten arkadaşsınız.',
+      pending: 'İsteğin zaten gönderildi, onay bekleniyor.',
+      limit_me: 'Arkadaş sınırına ulaştın (50).',
+      network: 'Bağlantı kurulamadı. İnternetini kontrol edip tekrar dene.',
+    } as Record<Exclude<RequestInviteResult, { ok: true }>['error'], string>,
+    sentTitle: 'İstek gönderildi ✓',
+    sentText: (n: string) => `${n || 'Arkadaşın'} onaylayınca arkadaş olacaksınız. Onaylandığında sana haber vereceğiz 🔔`,
+    decideErr: {
+      not_found: 'Bu istek artık geçerli değil.',
+      limit_me: 'Arkadaş sınırına ulaştın (50).',
+      limit_them: 'Arkadaşının listesi dolu (50).',
+      network: 'Bağlantı kurulamadı. İnternetini kontrol edip tekrar dene.',
+    } as Record<'not_found' | 'limit_me' | 'limit_them' | 'network', string>,
+    agoMin: (n: number) => (n < 1 ? 'az önce' : `${n} dk önce`),
+    agoHour: (n: number) => `${n} sa önce`,
+    leftHour: (n: number) => `${n} sa`,
+    leftMin: (n: number) => `${n} dk`,
   },
   en: {
     title: 'Friends',
-    lead: "Your friends' current moments. Only people you've paired with side by side appear here.",
+    lead: "Your friends' current moments. Only people you've approved appear here.",
     qr: 'Add with QR',
+    link: 'Invite with link',
     setupTitle: 'Two quick steps first',
     setupText: 'Your friends only see your current moment. No chat, no history.',
     step1: '1. Choose your display name',
@@ -130,7 +224,7 @@ const T = {
     start: 'Agree and continue',
     ruleMissing: 'Accept the rule to continue.',
     emptyTitle: 'No friends yet',
-    emptyText: 'Get together with a friend: one of you shows the code, the other scans it. That\'s it.',
+    emptyText: "Side by side? Scan a QR code. Far away? Send them an invite link.",
     noMoment: "Hasn't picked a moment",
     moodHidden: 'Keeps their mood private',
     same: 'Same as you',
@@ -143,7 +237,7 @@ const T = {
     remove: 'Remove friend',
     removeSub: (n: string) => `Removed from both lists right away. ${n} won't be notified.`,
     removeAsk: (n: string) => `Remove ${n}?`,
-    removeAskText: "You'll be removed from each other's lists. To add again, scan a QR code side by side.",
+    removeAskText: "You'll be removed from each other's lists. To add again, you'll need a QR code or an invite link.",
     removeYes: 'Remove',
     report: 'Report',
     reportSub: (n: string) => `Pick a reason; ${n} will be removed from your list.`,
@@ -173,6 +267,69 @@ const T = {
     } as Record<Exclude<AskResult, 'ok' | 'not_friend' | 'network'>, (n: string) => string>,
     allowTitle: 'Let my friends ask me',
     allowSub: '"What are you doing right now?" notification. At most 3 a day, never at night.',
+    requestsHead: (n: number) => `PENDING REQUESTS · ${n}`,
+    requestSub: (ago: string) => `Joined your invite · ${ago}`,
+    approve: 'Approve',
+    approved: (n: string) => `${n} is now your friend 🎉`,
+    rejectAsk: (n: string) => `Decline ${n}?`,
+    rejectText: "They won't be notified.",
+    rejectYes: 'Decline',
+    activeHead: 'YOUR ACTIVE INVITE',
+    sentHead: (n: number) => `REQUESTS YOU SENT · ${n}`,
+    sentSub: (ago: string) => `Waiting for approval · ${ago}`,
+    cancelReqAsk: 'Cancel this request?',
+    cancelReqText: (n: string) => `${n} will no longer see your request.`,
+    cancelReqYes: 'Cancel request',
+    activeTitle: (u: number, m: number) => `${u} / ${m} joined`,
+    activeSub: (left: string) => `Valid for ${left}`,
+    share: 'Share',
+    revoke: 'Cancel',
+    revokeAsk: 'Cancel this invite?',
+    revokeText: "This code will stop working. Requests you've received stay in your list.",
+    friendsHead: 'YOUR FRIENDS',
+    haveCode: 'I have an invite code',
+    inviteReady: 'Your invite is ready 🎉',
+    inviteReadySub: 'Send the link or tell them the code.\nValid for 24 hours · up to 10 people',
+    inviteCodeLabel: 'INVITE CODE',
+    sendWhatsApp: 'Send on WhatsApp',
+    sendOther: 'Share another way',
+    inviteNote: "People who join show up as requests.\nNo one becomes your friend until you approve.",
+    inviteErr: {
+      no_profile: 'Choose your display name first.',
+      limit_me: "You've reached the friend limit (50).",
+      daily_limit: "You've created enough invites today. Try again tomorrow.",
+      busy: "Couldn't create a code right now. Try again in a bit.",
+      network: "Couldn't connect. Check your internet and try again.",
+    } as Record<Exclude<CreateInviteResult, { ok: true }>['error'], string>,
+    codeTitle: 'Have an invite code?',
+    codeSub: 'Enter the 4-character code your friend sent you (e.g. K472).',
+    codeSend: 'Send request',
+    codeHint: "Too many wrong codes and you'll need to wait an hour.",
+    ownCodeTitle: 'This is your own invite code 🙂',
+    ownCodeText: 'Send the link to a friend. When they open it, you get a request to approve.',
+    codeErr: {
+      no_profile: 'Choose your display name first.',
+      too_many: 'Too many tries. Try again in an hour.',
+      not_found: "This code wasn't found or has expired.",
+      full: 'This invite is full. Ask your friend for a new code.',
+      self: "That's your own invite code.",
+      already: "You're already friends.",
+      pending: 'Your request is already sent and waiting for approval.',
+      limit_me: "You've reached the friend limit (50).",
+      network: "Couldn't connect. Check your internet and try again.",
+    } as Record<Exclude<RequestInviteResult, { ok: true }>['error'], string>,
+    sentTitle: 'Request sent ✓',
+    sentText: (n: string) => `You'll be friends once ${n || 'your friend'} approves. We'll let you know 🔔`,
+    decideErr: {
+      not_found: 'This request is no longer valid.',
+      limit_me: "You've reached the friend limit (50).",
+      limit_them: "Your friend's list is full (50).",
+      network: "Couldn't connect. Check your internet and try again.",
+    } as Record<'not_found' | 'limit_me' | 'limit_them' | 'network', string>,
+    agoMin: (n: number) => (n < 1 ? 'just now' : `${n} min ago`),
+    agoHour: (n: number) => `${n} h ago`,
+    leftHour: (n: number) => `${n} h`,
+    leftMin: (n: number) => `${n} min`,
   },
 };
 
@@ -210,6 +367,33 @@ export function FriendsTab({
   const [asked, setAsked] = useState<Record<string, number>>({});
   const [askingId, setAskingId] = useState<string | null>(null);
   const [allowAsks, setAllowAsksState] = useState(true);
+  // Davet
+  const [requests, setRequests] = useState<InviteRequest[]>([]);
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [inviteSheet, setInviteSheet] = useState<Invite | null>(null);
+  const [decidingId, setDecidingId] = useState<string | null>(null);
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [code, setCode] = useState('');
+  const [codeError, setCodeError] = useState('');
+  const [codeBusy, setCodeBusy] = useState(false);
+  const [codeFromLink, setCodeFromLink] = useState(false); // linkten geldiyse klavye kendiliğinden açılmasın
+  const [sentName, setSentName] = useState<string | null>(null);
+  const [sent, setSent] = useState<SentRequest[]>([]);
+  const [cancelingId, setCancelingId] = useState<string | null>(null);
+  const pendingCodeRef = useRef<string | null>(null);
+  const invitesRef = useRef<Invite[]>([]);
+  invitesRef.current = invites;
+
+  const loadInvites = useCallback(async () => {
+    const [rq, inv, sn] = await Promise.all([getInviteRequests(), getMyInvites(), getSentRequests()]);
+    setRequests(rq);
+    setInvites(inv);
+    setSent(sn);
+  }, []);
+
+  // Davet ekranından istek gönderilince listeleri hemen yenile
+  useEffect(() => onInvitesChanged(() => loadInvites().catch(() => {})), [loadInvites]);
 
   const load = useCallback(async () => {
     try {
@@ -219,7 +403,52 @@ export function FriendsTab({
     } catch {
       setLoadFailed(true);
     }
+    loadInvites().catch(() => {});
+  }, [loadInvites]);
+
+  // Davet linkinden gelen kod: kurulum bittiyse kod panelini doldurup aç, bitmediyse sonra aç
+  const setupRef = useRef<boolean | null>(null);
+  setupRef.current = setup;
+  useEffect(() => {
+    return onInviteCode((c) => {
+      if (setupRef.current) openCodeFromLink(c);
+      else pendingCodeRef.current = c;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Linkten gelen kodu göster.
+  // iPhone, ekran geçişi sürerken ya da başka bir panel açıkken yeni panel açılırsa onu göstermiyor.
+  // Bu yüzden önce açık panelleri kapat, geçiş bitsin, diğer pencereler (Günün Sorusu, rozet) kapansın, sonra aç.
+  const linkTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function openCodeFromLink(c: string) {
+    setInviteSheet(null);
+    setQrOpen(false);
+    setSentName(null);
+    setActionFor(null);
+    setReportFor(null);
+    setCodeOpen(false);
+    if (linkTimer.current) clearTimeout(linkTimer.current);
+    linkTimer.current = setTimeout(() => {
+      whenOverlayFree(() => {
+        // Kendi linkine dokunduysa kod panelini açma, ne yapacağını söyle
+        if (invitesRef.current.some((i) => i.code === c)) {
+          Alert.alert(t.ownCodeTitle, t.ownCodeText, [{ text: t.ok }]);
+          return;
+        }
+        setCode(c);
+        setCodeError('');
+        setCodeFromLink(true);
+        setCodeOpen(true);
+      });
+    }, 800);
+  }
+  useEffect(
+    () => () => {
+      if (linkTimer.current) clearTimeout(linkTimer.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     (async () => {
@@ -317,6 +546,131 @@ export function FriendsTab({
     }
   }
 
+  // ---- Davet ----
+  async function newInvite() {
+    if (creating) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    // Biri davete katılınca bildirim gelsin: izin yoksa iste, cihazı kaydet
+    enableInviteNotifications();
+    // Hâlâ geçerli ve dolmamış bir davet varsa yenisini üretmek yerine onu göster
+    const live = invites.find((i) => i.expiresAt > Date.now() && i.uses < i.maxUses);
+    if (live) {
+      setInviteSheet(live);
+      return;
+    }
+    setCreating(true);
+    const r = await createInvite();
+    setCreating(false);
+    if ('error' in r) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      Alert.alert(t.link, t.inviteErr[r.error], [{ text: t.ok }]);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    const inv = (r as { ok: true; invite: Invite }).invite;
+    setInvites((cur) => [inv, ...cur]);
+    setInviteSheet(inv);
+  }
+
+  function askRevoke(inv: Invite) {
+    Alert.alert(t.revokeAsk, t.revokeText, [
+      { text: t.cancel, style: 'cancel' },
+      {
+        text: t.revoke,
+        style: 'destructive',
+        onPress: async () => {
+          const ok = await revokeInvite(inv.id);
+          if (!ok) return showError();
+          setInvites((cur) => cur.filter((x) => x.id !== inv.id));
+        },
+      },
+    ]);
+  }
+
+  async function decide(rq: InviteRequest, accept: boolean) {
+    if (decidingId) return;
+    setDecidingId(rq.id);
+    const r = await decideInviteRequest(rq.id, accept);
+    setDecidingId(null);
+    if ('error' in r) {
+      Alert.alert(t.error, t.decideErr[r.error], [{ text: t.ok }]);
+      loadInvites().catch(() => {});
+      return;
+    }
+    setRequests((cur) => cur.filter((x) => x.id !== rq.id));
+    if (accept) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      Alert.alert(t.approve, t.approved(rq.name), [{ text: t.ok }]);
+      load();
+    }
+  }
+
+  function askReject(rq: InviteRequest) {
+    Alert.alert(t.rejectAsk(rq.name), t.rejectText, [
+      { text: t.cancel, style: 'cancel' },
+      { text: t.rejectYes, style: 'destructive', onPress: () => decide(rq, false) },
+    ]);
+  }
+
+  function openCode() {
+    Haptics.selectionAsync().catch(() => {});
+    setCode('');
+    setCodeError('');
+    setCodeFromLink(false);
+    setCodeOpen(true);
+  }
+
+  async function sendCode() {
+    const c = cleanCode(code);
+    if (!isValidCode(c)) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      setCodeError(t.codeErr.not_found);
+      return;
+    }
+    setCodeBusy(true);
+    // Arkadaşın onaylayınca bildirim gelsin
+    await enableInviteNotifications();
+    const r = await requestInvite(c);
+    setCodeBusy(false);
+    if ('error' in r) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      setCodeError(t.codeErr[r.error]);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    setCodeOpen(false);
+    const joinedName = (r as { ok: true; name: string }).name;
+    loadInvites().catch(() => {});
+    // iPhone: kod paneli kapanırken yenisi açılırsa görünmüyordu; kapanma bitsin, sonra aç
+    setTimeout(() => whenOverlayFree(() => setSentName(joinedName)), 700);
+  }
+
+  function askCancelSent(rq: SentRequest) {
+    Alert.alert(t.cancelReqAsk, t.cancelReqText(rq.name), [
+      { text: t.cancel, style: 'cancel' },
+      {
+        text: t.cancelReqYes,
+        style: 'destructive',
+        onPress: async () => {
+          setCancelingId(rq.id);
+          const ok = await cancelSentRequest(rq.id);
+          setCancelingId(null);
+          if (ok) setSent((cur) => cur.filter((x) => x.id !== rq.id));
+          else showError();
+        },
+      },
+    ]);
+  }
+
+  function ago(ms: number) {
+    const min = Math.floor((Date.now() - ms) / 60000);
+    return min < 60 ? t.agoMin(min) : t.agoHour(Math.floor(min / 60));
+  }
+  function left(ms: number) {
+    const min = Math.max(0, Math.floor((ms - Date.now()) / 60000));
+    return min >= 60 ? t.leftHour(Math.floor(min / 60)) : t.leftMin(min);
+  }
+
   async function sendReport(f: Friend, reason: ReportReason) {
     setReportFor(null);
     try {
@@ -351,12 +705,18 @@ export function FriendsTab({
           setSetup(true);
           setFriends([]);
           load();
+          if (pendingCodeRef.current) {
+            const c = pendingCodeRef.current;
+            pendingCodeRef.current = null;
+            openCodeFromLink(c);
+          }
         }}
       />
     );
   }
 
   const list = friends ?? [];
+  const activeInvite = invites.find((i) => i.expiresAt > Date.now()) ?? null;
 
   return (
     <View style={styles.root}>
@@ -368,22 +728,139 @@ export function FriendsTab({
       >
         <View style={styles.headRow}>
           <Text style={styles.title}>{t.title}</Text>
+          {friends ? <Text style={styles.countText}>{t.count(list.length)}</Text> : null}
+        </View>
+        <Text style={styles.lead}>{t.lead}</Text>
+        <View style={styles.addRow}>
           <Pressable
-            style={styles.qrBtn}
+            style={({ pressed }) => [styles.addBtn, styles.addBtnOutline, pressed && { opacity: 0.85 }]}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
               setQrOpen(true);
             }}
             accessibilityRole="button"
           >
-            <Ionicons name="qr-code-outline" size={17} color="#FFFFFF" />
-            <Text style={styles.qrText}>{t.qr}</Text>
+            <Ionicons name="qr-code-outline" size={17} color={ACCENT} />
+            <Text style={[styles.addText, { color: ACCENT }]}>{t.qr}</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.addBtn, pressed && { opacity: 0.85 }]}
+            onPress={newInvite}
+            disabled={creating}
+            accessibilityRole="button"
+          >
+            {creating ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <>
+                <Ionicons name="link-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.addText}>{t.link}</Text>
+              </>
+            )}
           </Pressable>
         </View>
-        <View style={styles.leadRow}>
-          <Text style={[styles.lead, { flex: 1 }]}>{t.lead}</Text>
-          {friends ? <Text style={styles.countText}>{t.count(list.length)}</Text> : null}
-        </View>
+
+        {requests.length > 0 ? (
+          <>
+            <Text style={styles.sectionHead}>{t.requestsHead(requests.length)}</Text>
+            {requests.map((rq) => (
+              <View key={rq.id} style={[styles.row, styles.requestRow]}>
+                <Avatar name={rq.name} />
+                <View style={{ flex: 1, gap: 3 }}>
+                  <Text style={styles.name} numberOfLines={1}>
+                    {rq.name}
+                  </Text>
+                  <Text style={styles.statusMuted} numberOfLines={1}>
+                    {t.requestSub(ago(rq.createdAt))}
+                  </Text>
+                </View>
+                {decidingId === rq.id ? (
+                  <ActivityIndicator color={ACCENT} />
+                ) : (
+                  <>
+                    <Pressable
+                      style={({ pressed }) => [styles.askBtn, pressed && { opacity: 0.85 }]}
+                      onPress={() => decide(rq, true)}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${t.approve}: ${rq.name}`}
+                    >
+                      <Text style={styles.askText}>{t.approve}</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.xBtn}
+                      onPress={() => askReject(rq)}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${t.rejectYes}: ${rq.name}`}
+                    >
+                      <Ionicons name="close" size={18} color={MUTED} />
+                    </Pressable>
+                  </>
+                )}
+              </View>
+            ))}
+          </>
+        ) : null}
+
+        {sent.length > 0 ? (
+          <>
+            <Text style={styles.sectionHead}>{t.sentHead(sent.length)}</Text>
+            {sent.map((rq) => (
+              <View key={rq.id} style={styles.row}>
+                <Avatar name={rq.name} />
+                <View style={{ flex: 1, gap: 3 }}>
+                  <Text style={styles.name} numberOfLines={1}>
+                    {rq.name}
+                  </Text>
+                  <Text style={styles.statusMuted} numberOfLines={1}>
+                    {t.sentSub(ago(rq.createdAt))}
+                  </Text>
+                </View>
+                {cancelingId === rq.id ? (
+                  <ActivityIndicator color={ACCENT} />
+                ) : (
+                  <Pressable
+                    style={styles.smallBtn}
+                    onPress={() => askCancelSent(rq)}
+                    hitSlop={6}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${t.cancelReqYes}: ${rq.name}`}
+                  >
+                    <Text style={styles.smallBtnText}>{t.revoke}</Text>
+                  </Pressable>
+                )}
+              </View>
+            ))}
+          </>
+        ) : null}
+
+        {activeInvite ? (
+          <>
+            <Text style={styles.sectionHead}>{t.activeHead}</Text>
+            <View style={styles.row}>
+              <View style={styles.codeBadge}>
+                <Text style={styles.codeBadgeText}>{activeInvite.code}</Text>
+              </View>
+              <View style={{ flex: 1, gap: 3 }}>
+                <Text style={styles.name} numberOfLines={1}>
+                  {t.activeTitle(activeInvite.uses, activeInvite.maxUses)}
+                </Text>
+                <Text style={styles.statusMuted}>{t.activeSub(left(activeInvite.expiresAt))}</Text>
+              </View>
+              <Pressable style={styles.smallBtn} onPress={() => setInviteSheet(activeInvite)} hitSlop={6}>
+                <Text style={styles.smallBtnText}>{t.share}</Text>
+              </Pressable>
+              <Pressable style={styles.smallBtn} onPress={() => askRevoke(activeInvite)} hitSlop={6}>
+                <Text style={styles.smallBtnText}>{t.revoke}</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : null}
+
+        {(requests.length > 0 || sent.length > 0 || activeInvite) && list.length > 0 ? (
+          <Text style={styles.sectionHead}>{t.friendsHead}</Text>
+        ) : null}
 
         {loadFailed ? <Text style={styles.loadError}>{t.loadError}</Text> : null}
 
@@ -480,8 +957,89 @@ export function FriendsTab({
             />
           </View>
         ) : null}
+
+        <Pressable onPress={openCode} hitSlop={10} style={{ alignSelf: 'center', paddingVertical: 6 }} accessibilityRole="button">
+          <Text style={styles.link}>{t.haveCode}</Text>
+        </Pressable>
       </ScrollView>
       <View style={[styles.statusShade, { height: topInset }]} pointerEvents="none" />
+
+      {/* Davet hazır: paylaş */}
+      <Sheet visible={!!inviteSheet} onClose={() => setInviteSheet(null)} bottomInset={bottomInset}>
+        {inviteSheet ? (
+          <>
+            <Text style={[styles.reportTitle, { textAlign: 'center' }]}>{t.inviteReady}</Text>
+            <Text style={[styles.cardSub, { textAlign: 'center' }]}>{t.inviteReadySub}</Text>
+            <View style={styles.codeBox}>
+              <Text style={styles.codeLabel}>{t.inviteCodeLabel}</Text>
+              <Text style={styles.codeBig}>{inviteSheet.code}</Text>
+            </View>
+            <Pressable
+              style={[styles.primaryBtn, styles.waBtn]}
+              onPress={() => shareInviteWhatsApp(inviteMessage(inviteSheet.code, me.displayName ?? undefined, lang))}
+              accessibilityRole="button"
+            >
+              <Ionicons name="logo-whatsapp" size={20} color="#FFFFFF" />
+              <Text style={styles.primaryText}>{t.sendWhatsApp}</Text>
+            </Pressable>
+            <Pressable
+              style={styles.ghostBtn}
+              onPress={() => shareInviteOther(inviteMessage(inviteSheet.code, me.displayName ?? undefined, lang))}
+              accessibilityRole="button"
+            >
+              <Text style={styles.ghostText}>{t.sendOther}</Text>
+            </Pressable>
+            <Text style={styles.sheetNote}>{t.inviteNote}</Text>
+          </>
+        ) : null}
+      </Sheet>
+
+      {/* Davet kodu gir */}
+      <Sheet visible={codeOpen} onClose={() => setCodeOpen(false)} bottomInset={bottomInset}>
+        <Text style={styles.reportTitle}>{t.codeTitle}</Text>
+        <Text style={styles.cardSub}>{t.codeSub}</Text>
+        <TextInput
+          style={styles.codeInput}
+          value={code}
+          onChangeText={(v) => {
+            setCode(cleanCode(v));
+            if (codeError) setCodeError('');
+          }}
+          placeholder="K472"
+          placeholderTextColor="#C5C8D2"
+          autoCapitalize="characters"
+          autoCorrect={false}
+          autoFocus={!codeFromLink}
+          maxLength={4}
+          returnKeyType="send"
+          onSubmitEditing={sendCode}
+        />
+        {codeError ? <Text style={[styles.formError, { textAlign: 'center', marginLeft: 0 }]}>{codeError}</Text> : null}
+        <Pressable
+          style={[styles.primaryBtn, { marginTop: 12 }, (codeBusy || code.length < 4) && { opacity: 0.6 }]}
+          onPress={sendCode}
+          disabled={codeBusy || code.length < 4}
+          accessibilityRole="button"
+        >
+          {codeBusy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryText}>{t.codeSend}</Text>}
+        </Pressable>
+        <Pressable style={styles.ghostBtn} onPress={() => setCodeOpen(false)}>
+          <Text style={styles.ghostText}>{t.cancel}</Text>
+        </Pressable>
+        <Text style={styles.sheetNote}>{t.codeHint}</Text>
+      </Sheet>
+
+      {/* İstek gönderildi */}
+      <Sheet visible={sentName !== null} onClose={() => setSentName(null)} bottomInset={bottomInset}>
+        <View style={{ alignItems: 'center', gap: 10, paddingTop: 4 }}>
+          <Avatar name={sentName || '?'} />
+          <Text style={[styles.reportTitle, { textAlign: 'center' }]}>{t.sentTitle}</Text>
+          <Text style={[styles.emptyText, { paddingHorizontal: 6 }]}>{t.sentText(sentName || '')}</Text>
+        </View>
+        <Pressable style={[styles.primaryBtn, { marginTop: 18 }]} onPress={() => setSentName(null)}>
+          <Text style={styles.primaryText}>{t.ok}</Text>
+        </Pressable>
+      </Sheet>
 
       <QrSheet
         visible={qrOpen}
@@ -743,13 +1301,16 @@ function Sheet({
 }) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <View style={styles.sheetWrap}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-        <View style={[styles.sheet, { paddingBottom: 22 + bottomInset }]}>
-          <View style={styles.grabber} />
-          {children}
+      {/* Klavye açılınca panel yukarı kalksın (davet kodu yazarken alan klavyenin altında kalıyordu) */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={styles.sheetWrap}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+          <View style={[styles.sheet, { paddingBottom: 22 + bottomInset }]}>
+            <View style={styles.grabber} />
+            {children}
+          </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -797,6 +1358,55 @@ const styles = StyleSheet.create({
   },
   qrText: { fontFamily: F.bold, fontSize: 14, color: '#FFFFFF' },
   leadRow: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
+  addRow: { flexDirection: 'row', gap: 10 },
+  addBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    backgroundColor: ACCENT,
+    borderRadius: 14,
+    minHeight: 46,
+    paddingHorizontal: 10,
+  },
+  addBtnOutline: { backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: ACCENT },
+  addText: { fontFamily: F.bold, fontSize: 14, color: '#FFFFFF' },
+  sectionHead: { fontFamily: F.bold, fontSize: 12, letterSpacing: 1, color: MUTED, marginTop: 6, marginLeft: 4, marginBottom: -4 },
+  requestRow: { borderWidth: 1.5, borderColor: '#C7D2FE' },
+  xBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F0F1F4', alignItems: 'center', justifyContent: 'center' },
+  codeBadge: { minWidth: 58, height: 44, borderRadius: 12, backgroundColor: '#E6ECFF', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
+  codeBadgeText: { fontFamily: F.bold, fontSize: 16, letterSpacing: 1, color: ACCENT },
+  smallBtn: { backgroundColor: '#F0F1F4', height: 32, paddingHorizontal: 12, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  smallBtnText: { fontFamily: F.bold, fontSize: 13, color: INK },
+  codeBox: {
+    marginTop: 16,
+    marginBottom: 4,
+    backgroundColor: '#F6F7FF',
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: '#A5B4FC',
+    borderRadius: 20,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  codeLabel: { fontFamily: F.bold, fontSize: 12, letterSpacing: 1.2, color: MUTED },
+  codeBig: { fontFamily: F.bold, fontSize: 48, letterSpacing: 10, color: ACCENT, marginTop: 2 },
+  waBtn: { flexDirection: 'row', gap: 8, backgroundColor: '#25D366', marginTop: 12 },
+  sheetNote: { fontFamily: F.regular, fontSize: 12.5, lineHeight: 18, color: MUTED, textAlign: 'center', marginTop: 12 },
+  codeInput: {
+    marginTop: 16,
+    borderWidth: 2,
+    borderColor: ACCENT,
+    backgroundColor: '#F6F7FF',
+    borderRadius: 18,
+    paddingVertical: 14,
+    textAlign: 'center',
+    fontFamily: F.bold,
+    fontSize: 40,
+    letterSpacing: 14,
+    color: ACCENT,
+  },
   lead: { fontFamily: F.regular, fontSize: 13, lineHeight: 18, color: SOFT },
   countText: { fontFamily: F.medium, fontSize: 13, color: MUTED },
   loadError: { fontFamily: F.medium, fontSize: 13, color: DANGER },

@@ -1,5 +1,6 @@
 // "Ben" sekmesi: bir profil sayfası değil, kişinin kendi ayarları. Kimse başkasının "Ben" sayfasını göremez.
 // 1.2: Görünen ad, meslek ve üniversite sadece telefonda tutulur; sunucuya hiçbir şey gitmez.
+// 1.5.1: "Şu An'ı arkadaşlarına öner" kartı (uygulamayı paylaş).
 import { useState } from 'react';
 import {
   FlatList,
@@ -9,6 +10,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   Text,
@@ -35,6 +37,10 @@ import {
 } from '@/lib/me';
 import { TERMS_URLS } from '@/lib/friends';
 import { searchUniversities, UNIVERSITY_OTHER } from '@/lib/universities';
+import { track } from '@/lib/analytics';
+
+// Uygulamayı paylaş: telefona göre doğru mağazayı açan indirme sayfası
+const SHARE_URL = 'https://4hhb9rs7vm-ops.github.io/aktivite-app/indir/';
 
 // ---- Renkler (tuvaldeki taslakla aynı) ----
 const BG = '#F4F5F7';
@@ -116,8 +122,12 @@ const T = {
     keepFriends: 'Arkadaşlarım kalsın',
     keepFriendsSub: 'Görünen adın da korunur, arkadaşların seni görmeye devam eder.',
     dropFriends: 'Arkadaşlarımı da sil',
-    dropFriendsSub: 'Herkesin listesinden de çıkarsın. Geri almak için yeniden QR okutmak gerekir.',
+    dropFriendsSub: 'Herkesin listesinden de çıkarsın. Geri almak için yeniden QR ya da davet linki gerekir.',
     delete: 'Sil',
+    shareTitle: "Şu An'ı arkadaşlarına öner",
+    shareSub: 'Ne kadar çok kişi, o kadar gerçek oran. Bir link at, gerisini onlar halletsin.',
+    shareBtn: 'Uygulamayı paylaş',
+    shareMessage: `Şu An'ı denedin mi? 👀 Ne yapıyorsan seç, seninle aynı şeyi yapan kaç kişi var gör. Her akşam 21:00'de Günün Sorusu sonuçları. Ücretsiz: ${SHARE_URL}`,
   },
   en: {
     title: 'Me',
@@ -181,8 +191,12 @@ const T = {
     keepFriends: 'Keep my friends',
     keepFriendsSub: 'Your display name is kept too, and your friends can still see you.',
     dropFriends: 'Delete my friends too',
-    dropFriendsSub: "You'll be removed from everyone's list. To undo, you'd need to scan QR codes again.",
+    dropFriendsSub: "You'll be removed from everyone's list. To undo, you'd need a QR code or an invite link again.",
     delete: 'Delete',
+    shareTitle: 'Recommend Şu An to friends',
+    shareSub: 'The more people, the more real the percentages. Send a link and let them do the rest.',
+    shareBtn: 'Share the app',
+    shareMessage: `Have you tried Şu An? 👀 Pick what you're doing and see how many people are doing the same. Question of the Day results every evening at 9 PM. Free: ${SHARE_URL}`,
   },
 };
 
@@ -487,6 +501,24 @@ export function MeTab({
               {streak.count === 0 ? t.streakStart : streak.doneToday ? t.streakDone : t.streakPending}
             </Text>
           </View>
+        </View>
+
+        {/* Uygulamayı paylaş */}
+        <View style={styles.shareCard}>
+          <Text style={styles.shareTitle}>{t.shareTitle}</Text>
+          <Text style={styles.shareSub}>{t.shareSub}</Text>
+          <Pressable
+            style={({ pressed }) => [styles.shareBtn, pressed && { opacity: 0.85 }]}
+            onPress={() => {
+              tap();
+              track('app_share', { from: 'me' });
+              Share.share({ message: t.shareMessage }).catch(() => {});
+            }}
+            accessibilityRole="button"
+          >
+            <Ionicons name="share-outline" size={18} color={ACCENT} />
+            <Text style={styles.shareBtnText}>{t.shareBtn}</Text>
+          </Pressable>
         </View>
 
         {/* Bildirimler */}
@@ -970,6 +1002,20 @@ const styles = StyleSheet.create({
   streakSub: { fontFamily: F.regular, fontSize: 12, color: '#C9D3EE', marginTop: 1 },
 
   sectionTitle: { fontFamily: F.bold, fontSize: 15, color: MUTED, marginTop: 4, marginBottom: -6, marginLeft: 4 },
+  shareCard: { backgroundColor: ACCENT, borderRadius: 22, padding: 18, gap: 6 },
+  shareTitle: { fontFamily: F.bold, fontSize: 17, color: '#FFFFFF' },
+  shareSub: { fontFamily: F.regular, fontSize: 13, lineHeight: 18, color: '#DCE1FF' },
+  shareBtn: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    minHeight: 46,
+  },
+  shareBtnText: { fontFamily: F.bold, fontSize: 15, color: ACCENT },
   langSwitch: { flexDirection: 'row', backgroundColor: '#F0F1F4', borderRadius: 999, padding: 3 },
   langPill: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999 },
   langPillOn: { backgroundColor: '#FFFFFF' },

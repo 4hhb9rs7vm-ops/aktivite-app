@@ -1,17 +1,20 @@
 // Alt bant · Rozetler sekmesi
 // Üstte lacivert başlık: üyelik rozetin, serin, canın ve bir sonraki hedef.
 // İki bölüm: "30 günlük yol" (Candy Crush tarzı harita, aşağıdan yukarı) ve "Rozetlerim".
+// 1.5.1: sonradan katılanlar için "Senin X. günün", kaçırılan soruları arşivden cevaplama,
+// yeni rozetler (Hoş geldin, Kasım Öncüsü, Meraklı Kâşif) ve hediye can.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import Svg, { Path } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import type { Lang } from '@/lib/i18n';
-import { dayLabel, fetchPollHistory, onPollsChanged } from '@/lib/dailyQuestion';
+import { dayLabel, fetchPollHistory, istanbulToday, onPollsChanged } from '@/lib/dailyQuestion';
 import {
   BADGE_BY_ID,
   BADGES,
   badgeName,
+  badgeVisible,
   checkBadges,
   getProgress,
   onBadgesChanged,
@@ -22,6 +25,7 @@ import {
 } from '@/lib/badges';
 import { receivedSelamTotal, sentSelamTotal, SELAM_MIN } from '@/lib/selam';
 import { track } from '@/lib/analytics';
+import { ArchiveSheet } from '@/components/ArchiveSheet';
 
 const NAVY = '#0F2A52';
 const AMBER = '#FBBF24';
@@ -58,6 +62,10 @@ const TEXT = {
     count: (a: number, b: number) => `${a} / ${b} rozet`,
     earned: 'Kazanıldı',
     canInfo: 'Her hafta 1 can: bir günü kaçırırsan serin bozulmaz.',
+    personal: (n: number) => `SENİN ${n}. GÜNÜN`,
+    giftInfo: 'Hediye: ilk haftanda 1 ekstra can 🛟',
+    archiveBtn: '📚 Kaçırdığın soruları keşfet',
+    archived: 'Arşivden',
   },
   en: {
     title: 'Badges',
@@ -82,6 +90,10 @@ const TEXT = {
     count: (a: number, b: number) => `${a} / ${b} badges`,
     earned: 'Earned',
     canInfo: "1 life per week: miss a day and your streak survives.",
+    personal: (n: number) => `YOUR DAY ${n}`,
+    giftInfo: 'Gift: 1 extra life in your first week 🛟',
+    archiveBtn: '📚 Explore the questions you missed',
+    archived: 'Archive',
   },
 };
 
@@ -119,6 +131,7 @@ export function BadgesTab({ lang, topInset, bottomSpace, onOpenPolls }: Props) {
   const [received, setReceived] = useState(0);
   const [sent, setSent] = useState(0);
   const [width, setWidth] = useState(0);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const pathTop = useRef(0);
   const viewH = useRef(500);
@@ -188,7 +201,17 @@ export function BadgesTab({ lang, topInset, bottomSpace, onOpenPolls }: Props) {
         : tierId === 'tier_30'
           ? tx.allDone
           : '';
-  const earnedCount = BADGES.filter((b) => earned[b.id]).length;
+  const today = istanbulToday();
+  const visibleBadges = BADGES.filter((b) => badgeVisible(b.id, earned, today));
+  const earnedCount = visibleBadges.filter((b) => earned[b.id]).length;
+  const kicker = progress && progress.personalDay > 0 ? tx.personal(progress.personalDay) : tx.kicker;
+  const showGift = !!progress && progress.personalDay > 0 && progress.personalDay <= 7;
+  const showArchiveBtn = !!progress && progress.days.some((d) => d.status === 'missed' || d.status === 'archived');
+
+  function openArchive() {
+    Haptics.selectionAsync().catch(() => {});
+    setArchiveOpen(true);
+  }
 
   function renderNode(d: PathDay) {
     const { x, y } = nodePos(d.n, width, progress!.days.length);
@@ -247,11 +270,23 @@ export function BadgesTab({ lang, topInset, bottomSpace, onOpenPolls }: Props) {
         </View>
       );
     }
+    if (d.status === 'archived') {
+      return (
+        <Pressable key={d.n} onPress={openArchive} style={[styles.node, styles.nodeArchived, { left: x - 20, top: y - 20 }]}>
+          <Text style={styles.nodeArchivedText}>✓</Text>
+        </Pressable>
+      );
+    }
     if (d.status === 'missed') {
       return (
-        <View key={d.n} style={[styles.node, styles.nodeMissed, { left: x - 20, top: y - 20 }]}>
+        <Pressable
+          key={d.n}
+          onPress={openArchive}
+          style={[styles.node, styles.nodeMissed, { left: x - 20, top: y - 20 }]}
+          accessibilityRole="button"
+        >
           <Text style={styles.nodeMissedText}>{d.n}</Text>
-        </View>
+        </Pressable>
       );
     }
     return (
@@ -321,7 +356,7 @@ export function BadgesTab({ lang, topInset, bottomSpace, onOpenPolls }: Props) {
     return (
       <View style={styles.badgesWrap}>
         <View style={styles.badgesTop}>
-          <Text style={styles.badgesCount}>{tx.count(earnedCount, BADGES.length)}</Text>
+          <Text style={styles.badgesCount}>{tx.count(earnedCount, visibleBadges.length)}</Text>
           {selamLine ? (
             <Text style={styles.selamLine} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
               👋 {selamLine}
@@ -329,7 +364,7 @@ export function BadgesTab({ lang, topInset, bottomSpace, onOpenPolls }: Props) {
           ) : null}
         </View>
         <View style={styles.grid}>
-          {BADGES.map((b) => {
+          {visibleBadges.map((b) => {
             const got = !!earned[b.id];
             const tr = (lang as string) === 'tr';
             return (
@@ -360,7 +395,7 @@ export function BadgesTab({ lang, topInset, bottomSpace, onOpenPolls }: Props) {
     <View style={{ flex: 1, backgroundColor: '#FFF9F0' }} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
       <StatusBar style="light" />
       <View style={[styles.header, { paddingTop: topInset + 12 }]}>
-          <Text style={styles.kicker}>{tx.kicker}</Text>
+          <Text style={styles.kicker}>{kicker}</Text>
           <Text style={styles.title}>{tx.title}</Text>
           <View style={styles.chips}>
             <View style={[styles.chip, styles.chipTier]}>
@@ -408,13 +443,29 @@ export function BadgesTab({ lang, topInset, bottomSpace, onOpenPolls }: Props) {
       >
         {seg === 'path' ? (
           <View>
-            <Text style={styles.canInfo}>{tx.canInfo}</Text>
+            {showArchiveBtn ? (
+              <Pressable style={styles.archiveBtn} onPress={openArchive} accessibilityRole="button">
+                <Text style={styles.archiveBtnText}>{tx.archiveBtn}</Text>
+              </Pressable>
+            ) : null}
+            <Text style={styles.canInfo}>{showGift ? tx.giftInfo : tx.canInfo}</Text>
             <View onLayout={(e) => (pathTop.current = e.nativeEvent.layout.y)}>{renderRoad()}</View>
           </View>
         ) : (
           renderBadges()
         )}
       </ScrollView>
+
+      <ArchiveSheet
+        visible={archiveOpen}
+        lang={lang}
+        topInset={topInset}
+        bottomInset={20}
+        onClose={() => {
+          setArchiveOpen(false);
+          load();
+        }}
+      />
     </View>
   );
 }
@@ -463,6 +514,10 @@ const styles = StyleSheet.create({
   nodeDone: { backgroundColor: AMBER },
   nodeDoneText: { fontFamily: F.bold, fontSize: 18, color: NAVY },
   nodeJoker: { backgroundColor: '#E4EAF3' },
+  nodeArchived: { backgroundColor: '#FFFFFF', borderWidth: 3, borderStyle: 'dashed', borderColor: AMBER },
+  nodeArchivedText: { fontFamily: F.bold, fontSize: 16, color: AMBER_FG },
+  archiveBtn: { marginHorizontal: 16, marginTop: 12, backgroundColor: NAVY, borderRadius: 16, minHeight: 50, alignItems: 'center', justifyContent: 'center' },
+  archiveBtnText: { fontFamily: F.bold, fontSize: 15, color: '#FFFFFF' },
   nodeMissed: { backgroundColor: '#F3EEE6', borderWidth: 2, borderColor: '#E0D6C4' },
   nodeMissedText: { fontFamily: F.bold, fontSize: 15, color: '#C2B8A6', textDecorationLine: 'line-through' },
   nodeLocked: { backgroundColor: '#ffffff', borderWidth: 2, borderColor: ROAD },

@@ -154,6 +154,7 @@ export async function setAllowAsks(on: boolean): Promise<boolean> {
 
 // ---- Bildirime dokununca doğru sekmeyi aç ----
 // "Sor" bildirimi → Şu An sekmesi (aktivite seç), "cevap verdi" bildirimi → Arkadaşlar sekmesi.
+// 1.5.1: davet bildirimleri ("davetine katıldı", "isteğini onayladı") → Arkadaşlar sekmesi.
 export type AskTab = 'now' | 'friends';
 let pendingTab: AskTab | null = null;
 const tabListeners = new Set<(t: AskTab) => void>();
@@ -179,5 +180,6 @@ export function onOpenTab(cb: (t: AskTab) => void): () => void {
 export function tabForNotification(type: string | undefined): AskTab | null {
   if (type === 'ask') return 'now';
   if (type === 'ask_answer') return 'friends';
+  if (type === 'invite_joined' || type === 'invite_accepted') return 'friends';
   return null;
 }

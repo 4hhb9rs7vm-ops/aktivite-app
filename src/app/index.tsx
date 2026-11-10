@@ -104,7 +104,10 @@ import {
   scheduleDailyMoments,
   setDailyMomentEnabled,
 } from '@/lib/notifications';
-import { FRIENDS_TAB_ENABLED, loadMe, Me, ME_KEY, saveMe, STUDENT } from '@/lib/me';
+import { FRIENDS_TAB_ENABLED, loadMe, Me, ME_KEY, onProfileChanged, saveMe, STUDENT } from '@/lib/me';
+import * as Clipboard from 'expo-clipboard';
+import { createInvite, getMyInvites, inviteUrl } from '@/lib/invite';
+import { cancelLeagueNotification } from '@/lib/campus';
 import { UNIVERSITY_OTHER } from '@/lib/universities';
 import { TAB_BAR_HEIGHT, TabBar, TabId } from '@/components/TabBar';
 import { MeTab } from '@/components/MeTab';
@@ -428,7 +431,8 @@ const FILTER_ICONS: Record<FilterId, ComponentType<{ size?: number; color?: stri
   gender: GenderIntersex,
   campus: GraduationCap,
 };
-type Ratio = { enough: boolean; pct?: number } | null;
+// fallback 'campus_all': kampüsten yeterli kişi yok, tüm üniversiteliler arasındaki oran döndü (1.5.2)
+type Ratio = { enough: boolean; pct?: number; fallback?: string } | null;
 type DashboardRow = { activity: string; cnt: number };
 
 
@@ -466,6 +470,18 @@ async function fetchActiveCount(): Promise<number | null> {
   const { data, error } = await supabase.rpc('get_active_count');
   if (error || typeof data !== 'number') return null;
   return data;
+}
+
+// 1.5.2: Sunucu ayarları (şimdilik sadece Ülke filtresi). Fonksiyon yoksa ya da hata olursa filtre gizli kalır.
+async function fetchAppFlags(): Promise<{ countryFilter: boolean }> {
+  try {
+    if (!(await ensureSession())) return { countryFilter: false };
+    const { data, error } = await supabase.rpc('get_app_flags');
+    if (error || !data) return { countryFilter: false };
+    return { countryFilter: !!(data as { country_filter?: boolean }).country_filter };
+  } catch {
+    return { countryFilter: false };
+  }
 }
 
 async function fetchDashboard(): Promise<DashboardRow[] | null> {
@@ -1464,6 +1480,216 @@ function DashboardScreen({
 }
 
 // ---------------------------------------------------------------------------
+// 1.5.2: "Şu an diğerleri ne yapıyor?" — sonuç kartındaki haptan açılan panel.
+// Kendiliğinden açılmaz; sadece dokununca. Az kişi varken (OTHERS_MIN altı) hap hiç görünmez.
+// Aktivite seçtiyse aktiviteler arasında, ruh hali seçtiyse ruh halleri arasında yüzde gösterilir
+// (sonuç kartındaki "Herkes" oranıyla aynı hesap).
+// ---------------------------------------------------------------------------
+const OTHERS_MIN = 20;
+const OTHERS_TOP = 5;
+
+type OthersItem = { id: string; pct: number; me: boolean };
+type OthersData = { total: number; items: OthersItem[]; rest: number; topIds: string[]; mood: boolean };
+
+function computeOthers(rows: DashboardRow[] | null, selectedId: string, mood: boolean): OthersData | null {
+  if (!rows) return null;
+  const known = rows.filter((r) => ACTIVITIES_BY_ID[r.activity] && r.cnt > 0);
+  // Ruh hali oranı herkese göre, aktivite oranı aktivite seçenlere göre (get_ratio ile aynı)
+  const pool = mood ? known.filter((r) => ACTIVITIES_BY_ID[r.activity].mood) : known.filter((r) => !ACTIVITIES_BY_ID[r.activity].mood);
+  let total = mood ? known.reduce((s, r) => s + r.cnt, 0) : pool.reduce((s, r) => s + r.cnt, 0);
+  const list = pool.map((r) => ({ id: r.activity, cnt: r.cnt }));
+  // Kendisi özet tabloda henüz yoksa say
+  if (!list.some((r) => r.id === selectedId)) {
+    list.push({ id: selectedId, cnt: 1 });
+    total += 1;
+  }
+  if (total < OTHERS_MIN) return null;
+  list.sort((a, b) => b.cnt - a.cnt);
+  const top = list.slice(0, OTHERS_TOP);
+  const mine = list.find((r) => r.id === selectedId);
+  if (mine && !top.includes(mine)) top.push(mine);
+  const items = top.map((r) => ({ id: r.id, pct: (r.cnt / total) * 100, me: r.id === selectedId }));
+  const shown = top.reduce((s, r) => s + r.cnt, 0);
+  // "Diğer": aktivitelerde listede olmayanlar; ruh hallerinde sadece diğer ruh halleri
+  const poolTotal = mood ? list.reduce((s, r) => s + r.cnt, 0) : total;
+  const rest = Math.max(0, ((poolTotal - shown) / total) * 100);
+  const topIds = list.filter((r) => r.id !== selectedId).slice(0, 3).map((r) => r.id);
+  return { total, items, rest, topIds, mood };
+}
+
+function roundPct(p: number, lang: Lang) {
+  const v = p < 1 ? '<1' : String(Math.round(p));
+  return lang === 'tr' ? '%' + v : v + '%';
+}
+
+// Sonuç kartının altındaki hap: "📱📺📚 Diğerleri ne yapıyor? ›"
+function OthersPill({ data, fg, bg, lang, onPress }: { data: OthersData; fg: string; bg: string; lang: Lang; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={6}
+      style={({ pressed }) => [os.pill, { backgroundColor: bg }, pressed && { opacity: 0.75 }]}
+      accessibilityRole="button"
+      accessibilityLabel={data.mood ? (lang === 'tr' ? 'Diğerleri nasıl?' : 'How are others?') : lang === 'tr' ? 'Diğerleri ne yapıyor?' : 'What are others doing?'}
+    >
+      <View style={os.pillIcons}>
+        {data.topIds.map((id, i) => {
+          const a = ACTIVITIES_BY_ID[id];
+          if (!a) return null;
+          return (
+            <View key={id} style={[os.pillIcon, { marginLeft: i === 0 ? 0 : -8, zIndex: 3 - i }]}>
+              <ActivityIcon activity={a} size={24} iconSize={14} />
+            </View>
+          );
+        })}
+      </View>
+      <Text style={[os.pillText, { color: fg }]} numberOfLines={1}>
+        {data.mood ? (lang === 'tr' ? 'Diğerleri nasıl?' : 'How are others?') : lang === 'tr' ? 'Diğerleri ne yapıyor?' : 'What are others doing?'}
+      </Text>
+      <Ionicons name="chevron-forward" size={15} color={fg} />
+    </Pressable>
+  );
+}
+
+function OthersSheet({
+  visible,
+  data,
+  lang,
+  onClose,
+}: {
+  visible: boolean;
+  data: OthersData | null;
+  lang: Lang;
+  onClose: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const max = data ? Math.max(...data.items.map((i) => i.pct), 1) : 1;
+  return (
+    <Modal visible={visible} transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
+      <View style={os.backdrop}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={lang === 'tr' ? 'Kapat' : 'Close'} />
+        <View style={[os.sheet, { paddingBottom: insets.bottom + SP.lg }]}>
+          <View style={os.grab} />
+          <Text style={os.title}>
+            {data?.mood
+              ? lang === 'tr'
+                ? 'Şu an diğerleri nasıl?'
+                : 'How is everyone right now?'
+              : lang === 'tr'
+                ? 'Şu an diğerleri ne yapıyor?'
+                : 'What is everyone doing right now?'}
+          </Text>
+          <View style={os.subRow}>
+            <View style={os.liveDot} />
+            <Text style={os.sub}>{lang === 'tr' ? 'Şu an uygulamadakiler · Herkes' : 'People in the app right now · Everyone'}</Text>
+          </View>
+          {data ? (
+            <View style={os.list}>
+              {data.items.map((it) => {
+                const a = ACTIVITIES_BY_ID[it.id];
+                if (!a) return null;
+                return (
+                  <View key={it.id} style={[os.row, it.me && os.rowMe]}>
+                    <ActivityIcon activity={a} size={34} iconSize={19} />
+                    <View style={{ flex: 1 }}>
+                      <View style={os.nameRow}>
+                        <View style={os.nameWrap}>
+                          <Text style={[os.name, it.me && { color: BRAND, fontFamily: F.bold }]} numberOfLines={1}>
+                            {activityName(it.id, lang)}
+                          </Text>
+                          {it.me ? (
+                            <View style={os.meTag}>
+                              <Text style={os.meTagText}>{lang === 'tr' ? 'SEN' : 'YOU'}</Text>
+                            </View>
+                          ) : null}
+                        </View>
+                        <Text style={[os.pct, it.me && { color: BRAND }]}>{roundPct(it.pct, lang)}</Text>
+                      </View>
+                      <View style={os.track}>
+                        <View
+                          style={[
+                            os.fill,
+                            { width: `${Math.max(3, (it.pct / max) * 100)}%`, backgroundColor: it.me ? BRAND : '#C7CCF6' },
+                          ]}
+                        />
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+              {data.rest >= 1 ? (
+                <View style={os.row}>
+                  <View style={os.restIcon}>
+                    <Ionicons name="ellipsis-horizontal" size={18} color={SOFT} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={os.nameRow}>
+                      <Text style={os.name}>{lang === 'tr' ? 'Diğer' : 'Other'}</Text>
+                      <Text style={os.pct}>{roundPct(data.rest, lang)}</Text>
+                    </View>
+                  </View>
+                </View>
+              ) : null}
+            </View>
+          ) : (
+            <ActivityIndicator color={BRAND} style={{ marginVertical: SP.xxl }} />
+          )}
+          <Pressable style={({ pressed }) => [os.closeBtn, pressed && { opacity: 0.85 }]} onPress={onClose} accessibilityRole="button">
+            <Text style={os.closeText}>{lang === 'tr' ? 'Kapat' : 'Close'}</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const os = StyleSheet.create({
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SP.sm,
+    marginTop: SP.lg,
+    borderRadius: 999,
+    paddingVertical: 5,
+    paddingLeft: 6,
+    paddingRight: SP.md,
+    maxWidth: '100%',
+  },
+  pillIcons: { flexDirection: 'row' },
+  pillIcon: { borderRadius: 9, borderWidth: 2, borderColor: '#ffffff', overflow: 'hidden' },
+  pillText: { fontFamily: F.bold, fontSize: FS.sm + 0.5, flexShrink: 1 },
+  link: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: SP.md, paddingVertical: 4 },
+  linkText: { fontFamily: F.bold, fontSize: FS.sm + 0.5 },
+  backdrop: { flex: 1, backgroundColor: 'rgba(10,14,30,0.45)', justifyContent: 'flex-end' },
+  sheet: {
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: SP.xl,
+    paddingTop: SP.sm + 2,
+  },
+  grab: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: '#DADCE3', marginBottom: SP.md + 2 },
+  title: { fontFamily: F.bold, fontSize: FS.xl, color: INK },
+  subRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#22C55E' },
+  sub: { fontFamily: F.regular, fontSize: FS.sm, color: FAINT },
+  list: { marginTop: SP.lg, gap: SP.sm },
+  row: { flexDirection: 'row', alignItems: 'center', gap: SP.md, paddingVertical: 5, paddingHorizontal: SP.sm, borderRadius: 14 },
+  rowMe: { backgroundColor: '#EEEDFB' },
+  nameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: SP.sm },
+  nameWrap: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
+  name: { fontFamily: F.medium, fontSize: FS.base, color: INK, flexShrink: 1 },
+  pct: { fontFamily: F.bold, fontSize: FS.base, color: INK },
+  meTag: { backgroundColor: BRAND, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 1 },
+  meTagText: { fontFamily: F.bold, fontSize: 10.5, color: '#ffffff', letterSpacing: 0.4 },
+  track: { height: 7, borderRadius: 4, backgroundColor: '#EEF0F4', marginTop: 5, overflow: 'hidden' },
+  fill: { height: 7, borderRadius: 4 },
+  restIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#F1F2F5', alignItems: 'center', justifyContent: 'center' },
+  closeBtn: { marginTop: SP.xl, height: 52, borderRadius: 16, backgroundColor: '#E9EAEE', alignItems: 'center', justifyContent: 'center' },
+  closeText: { fontFamily: F.bold, fontSize: 16, color: INK },
+});
+
+// ---------------------------------------------------------------------------
 // Tahmin adımı: sonuç açılmadan önce tek dokunuşla hızlı bir tahmin
 // ---------------------------------------------------------------------------
 type GuessBucket = { min: number; max: number; tr: string; en: string; trSub: string; enSub: string };
@@ -1922,12 +2148,16 @@ function ShareTipOverlay({
         {/* Öne çıkan paylaş düğmesi (gerçeğinin tam üstünde) */}
         <View style={[ws.ring, { top: rect.y - 6, left: rect.x - 6, width: rect.w + 12, height: rect.h + 12 }]}>
           <Pressable
-            style={[styles.primaryAction, { backgroundColor: fg, flex: 1 }]}
+            style={[styles.primaryAction, { backgroundColor: fg, flex: 1, paddingHorizontal: SP.sm }]}
             onPress={onShare}
             accessibilityRole="button"
+            accessibilityLabel={label}
           >
             <Ionicons name="share-social-outline" size={18} color="#ffffff" />
-            <Text style={styles.primaryActionText}>{label}</Text>
+            {/* Düğme artık yarım genişlikte: gerçeğindeki kısa yazıyı kullan, taşmasın */}
+            <Text style={styles.primaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+              {tr ? 'Arkadaşınla paylaş' : 'Share with a friend'}
+            </Text>
           </Pressable>
         </View>
       </Pressable>
@@ -1999,6 +2229,10 @@ export default function HomeScreen() {
   }, []);
   const [carry, setCarry] = useState<number | null>(null);
   const [topNow, setTopNow] = useState<{ id: string; pct: number } | null>(null);
+  // 1.5.2: "Diğerleri ne yapıyor?" paneli ve sunucudan gelen Ülke filtresi ayarı
+  const [othersRows, setOthersRows] = useState<DashboardRow[] | null>(null);
+  const [othersOpen, setOthersOpen] = useState(false);
+  const [countryFilterOn, setCountryFilterOn] = useState(false);
   const [pendingShare, setPendingShare] = useState(false);
   const [history, setHistory] = useState<MomentEntry[]>([]);
   const [endNotify, setEndNotify] = useState(false);
@@ -2187,6 +2421,53 @@ export default function HomeScreen() {
     };
   }, [selected, dashboardOpen]);
 
+  // 1.5.2: Sonuç ekranı açılınca "şu an herkes ne yapıyor" verisini al (hap ve panel için)
+  useEffect(() => {
+    if (!selected) {
+      setOthersRows(null);
+      setOthersOpen(false);
+      return;
+    }
+    let cancelled = false;
+    fetchDashboard().then((rows) => {
+      if (!cancelled) setOthersRows(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.id]);
+
+  useEffect(() => {
+    setOverlayBusy('others', othersOpen);
+    return () => setOverlayBusy('others', false);
+  }, [othersOpen]);
+
+  function openOthers() {
+    if (isOverlayBusy('others')) return;
+    tap();
+    track('others_open', { activity: selected?.id ?? '' });
+    setOthersOpen(true);
+    // Açarken tazele
+    fetchDashboard().then((rows) => {
+      if (rows) setOthersRows(rows);
+    });
+  }
+
+  // 1.5.2: Ülke filtresi sunucudan açılıp kapanır (en az 2 ülkede yeterli kişi olunca açılır; build gerekmez)
+  useEffect(() => {
+    let cancelled = false;
+    fetchAppFlags().then((f) => {
+      if (!cancelled) setCountryFilterOn(f.countryFilter);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (filter === 'country' && !countryFilterOn) setFilter('world');
+  }, [filter, countryFilterOn]);
+
   // Dünya oranı geldiğinde geçmişe yaz (haftalık özet için)
   useEffect(() => {
     if (!selected || !lock || filter !== 'world') return;
@@ -2256,11 +2537,48 @@ export default function HomeScreen() {
     setTimeout(() => Share.share({ message }).catch(() => {}), 450);
   }
 
+  // 1.5.2: ana ekranın sağ üstündeki paylaş simgesi
+  function shareApp() {
+    tap(true);
+    track('app_share', { from: 'home' });
+    const message =
+      lang === 'tr'
+        ? `Şu an ne yapıyorsun? Türkiye'de kaç kişi seninle aynı şeyi yapıyor, gör 👀 Şu An'ı indir: ${INVITE_URL}`
+        : `What are you doing right now? See how many people are doing the same 👀 Get Şu An: ${INVITE_URL}`;
+    Share.share({ message }).catch(() => {});
+  }
+
+  // 1.5.2: "Öğrenci misin?" ekranı okul ya da onay kaydedince bilgileri yeniden oku.
+  // An seçiliyse okul hemen sayılsın diye kaydı yeniden gönder.
+  const selectedRef = useRef<Activity | null>(null);
+  selectedRef.current = selected;
+  const profileRef = useRef<Profile>({});
+  profileRef.current = profile;
+  useEffect(() => {
+    return onProfileChanged(() => {
+      Promise.all([loadMe(), AsyncStorage.getItem('consent')])
+        .then(([m, c]) => {
+          setMe(m);
+          const ok = c === 'yes';
+          setConsent(ok);
+          const sel = selectedRef.current;
+          const uni =
+            m.occupation === STUDENT && m.university && m.university !== UNIVERSITY_OTHER ? m.university : undefined;
+          if (sel && ok && uni) {
+            pushPresence(sel.id, { ...profileRef.current, campus: uni }, true).catch(() => {});
+          }
+        })
+        .catch(() => {});
+    });
+  }, []);
+
   // Paylaş ipucu ("Bu oran hikâyelik!"): gerçek bir oran çıktığında ilk 3 kez, günde en fazla bir kez.
   // Filtre ipucu ya da bildirim kartı açıksa onların bitmesini bekler.
-  const shareBtnVisible = !!selected && !guessing && ratio !== null && !ratioError && !loading;
+  // Sadece gerçek bir oran varken ("Henüz veri yok" / ilk gelenlerdensin ekranında değil)
+  const shareBtnVisible =
+    !!selected && !guessing && !!ratio && ratio.enough === true && typeof ratio.pct === 'number' && !ratioError && !loading;
   useEffect(() => {
-    if (!shareBtnVisible || filterHint || notifPrompt || sharePreviewOpen || pendingShare) return;
+    if (!shareBtnVisible || filterHint || notifPrompt || sharePreviewOpen || pendingShare || othersOpen) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const d = new Date();
@@ -2290,7 +2608,7 @@ export default function HomeScreen() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [shareBtnVisible, filterHint, notifPrompt, sharePreviewOpen, pendingShare]);
+  }, [shareBtnVisible, filterHint, notifPrompt, sharePreviewOpen, pendingShare, othersOpen]);
 
   useEffect(() => {
     setOverlayBusy('sharetip', !!shareTipRect);
@@ -2358,7 +2676,7 @@ export default function HomeScreen() {
     return onOpenTab((target) => {
       if (target === 'friends' && !FRIENDS_TAB_ENABLED) return;
       // Davet linki ya da arkadaş bildirimi: an ekranı açıksa önce ana ekrana dön (an kilidi korunur)
-      if (target === 'friends') goHome();
+      if (target === 'friends' || target === 'me') goHome();
       setTab(target);
     });
   }, []);
@@ -2626,7 +2944,8 @@ export default function HomeScreen() {
   async function resetAll(deleteFriends: boolean) {
     // Not: 30 dakikalık seçim kilidi bilinçli olarak silinmez (kişisel veri değil, kural sayacı)
     const keepFriends = friendsSetup && !deleteFriends;
-    await AsyncStorage.multiRemove(['profile', 'consent', HISTORY_KEY, ME_KEY]);
+    await AsyncStorage.multiRemove(['profile', 'consent', HISTORY_KEY, ME_KEY, 'student_asked_v1', 'campus_league_v1']);
+    cancelLeagueNotification().catch(() => {});
     // Sıfırlanınca ilk açılış deneyimi de baştan: hoş geldin kartı, paylaş ipucu, filtre ipucu
     await AsyncStorage.multiRemove([WELCOME_KEY, SHARE_TIP_KEY, SHARE_TIP2_KEY, 'filterHintSeen']);
     setWelcomeCheck((n) => n + 1);
@@ -2666,6 +2985,29 @@ export default function HomeScreen() {
     if (!selected) return;
     tap();
     setSharePreviewOpen(true);
+    prepareStoryLink().catch(() => {});
+  }
+
+  // 1.5.2: hikâyeye eklenecek link. Görünen adı olan (arkadaş özelliğini kuran) kişide kendi davet linki,
+  // yoksa indirme linki. Paylaş'a basınca panoya kopyalanır.
+  const [storyLink, setStoryLink] = useState<{ url: string; invite: boolean } | null>(null);
+  async function prepareStoryLink() {
+    try {
+      if (me.displayName) {
+        const list = await getMyInvites();
+        const now = Date.now();
+        let inv = list.find((i) => i.expiresAt > now && i.uses < i.maxUses) ?? null;
+        if (!inv) {
+          const r = await createInvite();
+          if ('invite' in r) inv = r.invite;
+        }
+        if (inv) {
+          setStoryLink({ url: inviteUrl(inv.code, me.displayName), invite: true });
+          return;
+        }
+      }
+    } catch {}
+    setStoryLink({ url: INVITE_URL, invite: false });
   }
 
   // Önizlemede "Paylaş": görseli panel açıkken üret, paneli kapat,
@@ -2691,6 +3033,10 @@ export default function HomeScreen() {
       return;
     }
     pendingShareUri.current = uri;
+    // Hikâyedeki link etiketine yapıştırmak için linki panoya kopyala
+    const link = storyLink ?? { url: INVITE_URL, invite: false };
+    Clipboard.setStringAsync(link.url).catch(() => {});
+    track('app_share', { from: 'story', invite: link.invite });
     setSharePreviewOpen(false);
     // iOS'ta panelin onDismiss'i tetikler; Android'de ya da tetiklenmezse yedek zamanlayıcı
     setTimeout(openShareSheet, Platform.OS === 'ios' ? 1200 : 450);
@@ -2769,8 +3115,12 @@ export default function HomeScreen() {
   if (selected) {
     const { bg, fg } = selected;
     const visibleFilters = FILTERS.filter(
-      (f) => (f.id !== 'city' || profile.country === COUNTRY_TR) && (f.id !== 'campus' || !!campus)
+      (f) =>
+        (f.id !== 'city' || profile.country === COUNTRY_TR) &&
+        (f.id !== 'campus' || !!campus) &&
+        (f.id !== 'country' || countryFilterOn)
     );
+    const others = computeOthers(othersRows, selected.id, !!selected.mood);
     const needsProfile = filter !== 'world';
     const value = needsProfile ? fullProfile[filter as keyof Profile] : undefined;
     const picking = needsProfile && (!value || editing);
@@ -2783,7 +3133,12 @@ export default function HomeScreen() {
     const isReal = frozenPct !== null || (!!ratio?.enough && typeof ratio.pct === 'number');
     const pct = frozenPct !== null ? frozenPct : isReal ? (ratio!.pct as number) : null;
     const showCompare = guess !== null && filter === 'world';
-    const shareLine = ratioLine(filter, value, lang, !!selected.mood);
+    const campusFallback = filter === 'campus' && ratio?.fallback === 'campus_all';
+    const shareLine = campusFallback
+      ? lang === 'tr'
+        ? 'Kampüsünden henüz yeterli kişi yok · Şu an üniversiteliler arasında seninle aynı şeyi yapanların oranı'
+        : 'Not enough people from your campus yet · Share of university students doing the same as you right now'
+      : ratioLine(filter, value, lang, !!selected.mood);
 
     const elapsed = startedAt ? now - startedAt : 0;
     // Boş ekranda gösterilecek bugünkü Günün Anı saati (henüz geçmediyse)
@@ -2888,7 +3243,10 @@ export default function HomeScreen() {
             </View>
             <CountUp value={pct} color={fg} lang={lang} />
             <Text style={styles.line}>{shareLine}</Text>
-            <View style={[styles.peopleRow, showCompare && { display: 'none' }]}>
+            {others && !showCompare ? (
+              <OthersPill data={others} fg={fg} bg={bg} lang={lang} onPress={openOthers} />
+            ) : null}
+            <View style={[styles.peopleRow, (showCompare || !!others) && { display: 'none' }]}>
               <View style={styles.avatarStack}>
                 {[PALETTE.amber, PALETTE.indigo, PALETTE.teal].map((c, i) => (
                   <View
@@ -2903,6 +3261,21 @@ export default function HomeScreen() {
             </View>
             {showCompare ? (
               <GuessCompare key={selected.id + '-' + guess} guess={guess} pct={pct} fg={fg} bg={bg} lang={lang} />
+            ) : null}
+            {others && showCompare ? (
+              <Pressable onPress={openOthers} hitSlop={8} style={os.link} accessibilityRole="button">
+                <Text style={[os.linkText, { color: fg }]}>
+                  👀{' '}
+                  {others.mood
+                    ? lang === 'tr'
+                      ? 'Diğerleri nasıl?'
+                      : 'How are others?'
+                    : lang === 'tr'
+                      ? 'Diğerleri ne yapıyor?'
+                      : 'What are others doing?'}
+                </Text>
+                <Ionicons name="chevron-forward" size={14} color={fg} />
+              </Pressable>
             ) : null}
           </View>
         </View>
@@ -2992,7 +3365,14 @@ export default function HomeScreen() {
           lang,
           pct: resultShown ? pct : null,
           filter,
-          value: filter === 'world' ? null : (value as string | null | undefined),
+          value:
+            filter === 'world'
+              ? null
+              : campusFallback
+                ? lang === 'tr'
+                  ? 'Üniversite'
+                  : 'university'
+                : (value as string | null | undefined),
         })
       : null;
 
@@ -3141,6 +3521,8 @@ export default function HomeScreen() {
           </View>
         </FadeIn>
 
+        <OthersSheet visible={othersOpen} data={others} lang={lang} onClose={() => setOthersOpen(false)} />
+
         {(resultShown || noData) && story ? (
           <>
             <StoryCard innerRef={shareRef} story={story} />
@@ -3150,7 +3532,15 @@ export default function HomeScreen() {
               fg={fg}
               bg={bg}
               lang={lang}
-              hint={tx.storyHintText}
+              hint={
+                storyLink?.invite
+                  ? lang === 'tr'
+                    ? "Paylaş'a basınca davet linkin kopyalanır. Hikâyende link etiketi ekle, yapıştır: dokunan arkadaşın olur (24 saat, ilk 10 kişi)."
+                    : 'Your invite link is copied when you tap Share. Add a link sticker to your story and paste it: whoever taps becomes your friend (24 hours, first 10 people).'
+                  : lang === 'tr'
+                    ? "Paylaş'a basınca indirme linki kopyalanır. Hikâyende link etiketi ekle, yapıştır; görenler Şu An'ı hemen bulsun."
+                    : 'The download link is copied when you tap Share. Add a link sticker to your story and paste it so others find Şu An right away.'
+              }
               cancelLabel={tx.cancel}
               onShare={shareStory}
               onClose={() => setSharePreviewOpen(false)}
@@ -3298,14 +3688,28 @@ export default function HomeScreen() {
               {showHeroCount ? (
                 <>
                   <View style={styles.liveDot} />
-                  <Text style={styles.heroLive}>{tx.heroCount(formatCount(activeCount!, lang))}</Text>
+                  <Text style={[styles.heroLive, { flexShrink: 1 }]} numberOfLines={1}>
+                    {tx.heroCount(formatCount(activeCount!, lang))}
+                  </Text>
                 </>
               ) : (
                 <>
                   <Ionicons name={part.icon} size={14} color={part.color} />
-                  <Text style={styles.heroLive}>{part.text}</Text>
+                  <Text style={[styles.heroLive, { flexShrink: 1 }]} numberOfLines={1}>
+                    {part.text}
+                  </Text>
                 </>
               )}
+              {/* 1.5.2: uygulamayı paylaş — satırın sağ ucunda, başlığın üstüne binmez */}
+              <Pressable
+                onPress={shareApp}
+                hitSlop={10}
+                style={({ pressed }) => [styles.heroShare, pressed && { opacity: 0.7 }]}
+                accessibilityRole="button"
+                accessibilityLabel={lang === 'tr' ? "Şu An'ı paylaş" : 'Share Şu An'}
+              >
+                <Ionicons name="share-outline" size={16} color="#ffffff" />
+              </Pressable>
             </View>
             {night ? (
               <Text style={styles.heroTitle}>
@@ -3567,6 +3971,16 @@ const styles = StyleSheet.create({
   },
   heroPeople: { position: 'absolute', right: -6, bottom: 18, width: 150, height: 124 },
   heroLiveRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  heroShare: {
+    marginLeft: 'auto',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
   liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#22C55E' },
   heroLive: { fontFamily: F.regular, fontSize: FS.sm, color: 'rgba(255,255,255,0.75)' },
   heroTitle: {

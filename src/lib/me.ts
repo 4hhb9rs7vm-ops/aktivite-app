@@ -31,6 +31,24 @@ export async function saveMe(me: Me): Promise<void> {
   try {
     await AsyncStorage.setItem(ME_KEY, JSON.stringify(me));
   } catch {}
+  notifyProfileChanged();
+}
+
+// 1.5.2: "Öğrenci misin?" ekranı (ana ekranın dışında) okul ya da onay kaydedince
+// ana ekran ve Ben sekmesi güncel bilgiyi yeniden okusun diye haber verilir.
+const profileListeners = new Set<() => void>();
+export function notifyProfileChanged(): void {
+  profileListeners.forEach((f) => {
+    try {
+      f();
+    } catch {}
+  });
+}
+export function onProfileChanged(cb: () => void): () => void {
+  profileListeners.add(cb);
+  return () => {
+    profileListeners.delete(cb);
+  };
 }
 
 // ---- Meslek ----

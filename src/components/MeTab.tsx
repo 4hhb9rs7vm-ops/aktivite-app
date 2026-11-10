@@ -37,6 +37,7 @@ import {
 } from '@/lib/me';
 import { TERMS_URLS } from '@/lib/friends';
 import { searchUniversities, UNIVERSITY_OTHER } from '@/lib/universities';
+import { CampusLeagueCard } from '@/components/CampusLeague';
 import { track } from '@/lib/analytics';
 
 // Uygulamayı paylaş: telefona göre doğru mağazayı açan indirme sayfası
@@ -413,6 +414,8 @@ export function MeTab({
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.title}>{t.title}</Text>
+        {/* 1.5.2: Kampüs Ligi kartı (sadece okulunu seçen öğrencilerde) */}
+        <CampusLeagueCard me={me} lang={lang === 'en' ? 'en' : 'tr'} />
         <View style={styles.privacyCard} accessibilityRole="text">
           <View style={styles.privacyIcon}>
             <Ionicons name="shield-checkmark" size={20} color={ACCENT} />

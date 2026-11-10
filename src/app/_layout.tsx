@@ -9,6 +9,7 @@ import { startAnalytics, track } from '@/lib/analytics';
 import { openTabFromNotification, registerPushToken, tabForNotification } from '@/lib/ask';
 import { DailyQuestionGate } from '@/components/DailyQuestionGate';
 import { BadgeCelebration } from '@/components/BadgeCelebration';
+import { CampusLeagueHost } from '@/components/CampusLeague';
 
 // Yerel açılış ekranı (lacivert zemin + logo), ana ekran hazır olana kadar açık kalır.
 // Kapatma işi src/app/index.tsx içinde, yazı tipleri ve veriler yüklenince yapılır.
@@ -80,6 +81,8 @@ export default function RootLayout() {
       <DailyQuestionGate />
       {/* Yeni rozet kazanılınca kutlama */}
       <BadgeCelebration />
+      {/* 1.5.2 Kampüs Ligi: öğrenci sorusu, okul kilidi, Pazartesi sonucu */}
+      <CampusLeagueHost />
     </ThemeProvider>
   );
 }

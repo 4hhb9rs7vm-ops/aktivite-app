@@ -122,7 +122,9 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
 
   const [visible, setVisible] = useState(true);
   // Anketler sekmesinden açılınca ara ekran olmadan doğrudan sonuç düzeniyle başlar
-  const [revealed, setRevealed] = useState(autoReveal);
+  // 1.5.2: soruyu cevaplamamış (akşam izleyicisi) ise kendi cevabı yok; doğrudan sonuç
+  const watcher = !myKey;
+  const [revealed, setRevealed] = useState(autoReveal || watcher);
   const [sharing, setSharing] = useState(false);
   const [tier, setTier] = useState<TierId | null>(null);
   const [selam, setSelam] = useState<SelamSummary | null>(null);
@@ -133,12 +135,15 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
   const listAnim = useRef(new Animated.Value(0)).current;
   const fadeIn = useRef(new Animated.Value(0)).current;
 
-  const pctOf = (key: string) => Math.round(result.pct[key] ?? 0);
-  const myPct = pctOf(myKey);
+  const pctOf = (key: string | null) => (key ? Math.round(result.pct[key] ?? 0) : 0);
   const pcts = question.options.map((o) => pctOf(o.key));
   const maxPct = Math.max(...pcts);
   const minPct = Math.min(...pcts);
-  const myOption = question.options.find((o) => o.key === myKey) ?? question.options[0];
+  // İzleyici için en çok seçilen cevap öne çıkar
+  const topKey = question.options[pcts.indexOf(maxPct)]?.key ?? question.options[0].key;
+  const shownKey = myKey ?? topKey;
+  const myPct = pctOf(shownKey);
+  const myOption = question.options.find((o) => o.key === shownKey) ?? question.options[0];
   const myLabel = optionLabel(myOption, lang);
   const club = clubName(myOption, lang);
   const qText = questionText(question, lang) ?? question.question_tr;
@@ -158,7 +163,7 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
 
   useEffect(() => {
     Animated.timing(fadeIn, { toValue: 1, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-    track('result_shown', { day: question.day_date, source });
+    track('result_shown', { day: question.day_date, source: watcher ? 'evening' : source });
     getTier().then(setTier).catch(() => {});
     // Selam şeridi sadece bugünün ya da dünün sonucunda
     const selamDay = question.day_date === istanbulToday() || question.day_date === istanbulYesterday();
@@ -168,7 +173,7 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
         if (s) track('selam_seen', { day: question.day_date, total: s.total });
       })
       .catch(() => {});
-    if (autoReveal) {
+    if (autoReveal || watcher) {
       const timer = setTimeout(playResult, 150);
       return () => clearTimeout(timer);
     }
@@ -327,30 +332,50 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
                   style={[styles.verdictCard, { opacity: verdictAnim, transform: [{ scale: verdictScale }] }]}
                 >
                   <View style={styles.verdictHead}>
-                    <Text style={styles.verdictTitle}>{tx[verdict]}</Text>
+                    <Text style={styles.verdictTitle}>
+                      {watcher ? ((lang as string) === 'tr' ? 'Türkiye’nin cevabı' : "Everyone's answer") : tx[verdict]}
+                    </Text>
                     <View style={styles.pctBadge}>
                       <Text style={styles.pctBadgeText}>%{myPct}</Text>
                     </View>
                   </View>
-                  <Text style={styles.verdictText}>{verdictText}</Text>
+                  <Text style={styles.verdictText}>
+                    {watcher
+                      ? (lang as string) === 'tr'
+                        ? `Çoğunluk "${myLabel}" dedi.`
+                        : `Most people said "${myLabel}".`
+                      : verdictText}
+                  </Text>
                   {club ? (
                     <View style={styles.clubBox}>
                       <Text style={styles.clubLine} numberOfLines={2}>
-                        <Text style={styles.clubPre}>{tx.clubPre} </Text>
+                        <Text style={styles.clubPre}>
+                          {watcher ? ((lang as string) === 'tr' ? 'Kazanan kulüp:' : 'Winning club:') : tx.clubPre}{' '}
+                        </Text>
                         <Text style={styles.clubName}>{club}</Text>
-                        {tx.clubPost ? <Text style={styles.clubPre}> {tx.clubPost}</Text> : null}
+                        {tx.clubPost && !watcher ? <Text style={styles.clubPre}> {tx.clubPost}</Text> : null}
                       </Text>
                     </View>
                   ) : null}
                 </Animated.View>
 
                 {/* 2) Paylaş (kapatmak için üstteki çarpı) */}
-                <Animated.View style={{ opacity: verdictAnim, marginTop: 12 }}>
-                  <Pressable onPress={share} style={styles.shareBtn} accessibilityRole="button" disabled={sharing}>
-                    <ShareNetwork size={22} color={NAVY} weight="bold" />
-                    <Text style={styles.shareText}>{tx.share}</Text>
-                  </Pressable>
-                </Animated.View>
+                {watcher ? (
+                  <Animated.View style={[styles.watchBox, { opacity: verdictAnim }]}>
+                    <Text style={styles.watchText}>
+                      {(lang as string) === 'tr'
+                        ? 'Bugün cevaplamadın. Yarın sen de cevapla, hangi kulüpte olduğunu gör 👀'
+                        : "You didn't answer today. Answer tomorrow and see which club you're in 👀"}
+                    </Text>
+                  </Animated.View>
+                ) : (
+                  <Animated.View style={{ opacity: verdictAnim, marginTop: 12 }}>
+                    <Pressable onPress={share} style={styles.shareBtn} accessibilityRole="button" disabled={sharing}>
+                      <ShareNetwork size={22} color={NAVY} weight="bold" />
+                      <Text style={styles.shareText}>{tx.share}</Text>
+                    </Pressable>
+                  </Animated.View>
+                )}
 
                 {/* 3) Tüm cevaplar en altta */}
                 <Animated.View style={[styles.listBox, { opacity: listAnim }]}>
@@ -367,7 +392,7 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
                   </View>
                   <View style={{ gap: 6, marginTop: 10 }}>
                     {question.options.map((o, i) => {
-                      const mine = o.key === myKey;
+                      const mine = o.key === shownKey;
                       const width = bars[i].interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] });
                       return (
                         <View key={o.key} style={[styles.bar, mine && styles.barMine]}>
@@ -397,6 +422,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: NAVY,
   },
+  watchBox: {
+    marginTop: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  watchText: { fontFamily: F.medium, fontSize: 14.5, lineHeight: 20, color: '#ffffff', textAlign: 'center' },
   offscreen: {
     position: 'absolute',
     left: -STORY_W * 3,

@@ -54,7 +54,7 @@ import {
 import { DailyResultReveal } from '@/components/DailyResultReveal';
 import { scheduleResultNotification } from '@/lib/notifications';
 import { track } from '@/lib/analytics';
-import { setOverlayBusy } from '@/lib/overlay';
+import { isOverlayBusy, setOverlayBusy, whenOverlayFree } from '@/lib/overlay';
 import { checkBadges } from '@/lib/badges';
 
 // index.tsx'teki açılış ekranı 3,5 sn sürüyor. Kart, ana ekran kısa bir an göründükten sonra gelsin.
@@ -119,16 +119,17 @@ export function DailyQuestionGate() {
 
   const [visible, setVisible] = useState(false);
   // Açıkken rozet kutlaması beklesin (iPhone'da iki pencere çakışıp ekranı kilitliyordu)
+  const [reveal, setReveal] = useState<PendingReveal | null>(null);
+  // 1.5.2: sonuç ekranı açıkken de başka pencereler (Kampüs Ligi, rozet) beklesin
   useEffect(() => {
-    setOverlayBusy('gate', visible);
+    setOverlayBusy('gate', visible || !!reveal);
     return () => setOverlayBusy('gate', false);
-  }, [visible]);
+  }, [visible, reveal]);
   const [question, setQuestion] = useState<DailyQuestion | null>(null);
   const [lang, setLang] = useState<Lang>('tr');
   const [phase, setPhase] = useState<Phase>('question');
   const [picked, setPicked] = useState<string | null>(null);
   const [streak, setStreak] = useState(0);
-  const [reveal, setReveal] = useState<PendingReveal | null>(null);
 
   const checking = useRef(false);
   const answeredNow = useRef(false); // bu kartta cevap verildi mi (kapanınca rozet kontrolü için)
@@ -147,6 +148,14 @@ export function DailyQuestionGate() {
       const l: Lang = (await loadLang()) ?? 'tr';
       const pending = await findPendingReveal(l, TEST_MODE);
       if (pending) {
+        // Başka bir pencere (Kampüs Ligi, rozet) açıksa kapanmasını bekle
+        if (isOverlayBusy('gate')) {
+          whenOverlayFree(() => {
+            checking.current = false;
+            check().catch(() => {});
+          }, 'gate');
+          return;
+        }
         visibleRef.current = true;
         setLang(l);
         setReveal(pending);
@@ -172,8 +181,12 @@ export function DailyQuestionGate() {
     setQuestion(q);
     setPicked(null);
     setPhase('question');
-    open();
-    track('question_shown', { day: q.day_date, source: 'gate' });
+    // Başka bir pencere (Kampüs Ligi, rozet) açıksa kapanınca aç
+    whenOverlayFree(() => {
+      if (visibleRef.current) return;
+      open();
+      track('question_shown', { day: q.day_date, source: 'gate' });
+    }, 'gate');
   }
 
   // Sonuç ekranı kapandı. Paylaş denildiyse modal tamamen kapandıktan sonra paylaşma penceresi,

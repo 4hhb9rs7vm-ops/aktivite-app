@@ -36,7 +36,11 @@ export type EventName =
   | 'invite_link_open'
   | 'app_share'
   | 'insta_tip_shown'
-  | 'archive_answered';
+  | 'archive_answered'
+  | 'student_prompt'
+  | 'campus_picked'
+  | 'campus_lock'
+  | 'others_open';
 
 type Props = Record<string, string | number | boolean | null>;
 

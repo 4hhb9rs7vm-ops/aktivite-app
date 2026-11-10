@@ -89,6 +89,11 @@ export function istanbulHour(d: Date = new Date()): number {
 export function isBeforeResults(d: Date = new Date()): boolean {
   return istanbulHour(d) < RESULT_HOUR;
 }
+// 21:01–23:50 (İstanbul): cevaplamayanlara da günün sonucu gösterilir
+export function inEveningWindow(d: Date = new Date()): boolean {
+  const m = istanbulHour(d) * 60 + d.getUTCMinutes();
+  return m >= RESULT_HOUR * 60 + 1 && m <= 23 * 60 + 50;
+}
 
 const MONTHS = {
   tr: ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'],
@@ -373,7 +378,7 @@ export async function pollsBadge(lang: Lang): Promise<boolean> {
 
 export type PendingReveal = {
   question: DailyQuestion;
-  myKey: string;
+  myKey: string | null; // null: soruyu cevaplamamış, akşam sonucu "izleyici" olarak görüyor
   result: DQResult;
   isYesterday: boolean;
 };
@@ -390,10 +395,11 @@ export async function findPendingReveal(lang: Lang, force = false): Promise<Pend
     const q = await fetchQuestionByDate(day);
     if (!q || !questionText(q, lang)) return null;
     const myKey = await getServerAnswer(q);
-    if (!myKey) return null;
+    // 1.5.2: bugün cevaplamamış biri 21:01–23:50 arasında açarsa bugünün sonucunu görsün
+    if (!myKey && !(force || (after && day === istanbulToday() && inEveningWindow()))) return null;
     const result = await fetchResults(q);
     if (!result) return null;
-    return { question: q, myKey, result, isYesterday: day !== istanbulToday() };
+    return { question: q, myKey: myKey ?? null, result, isYesterday: day !== istanbulToday() };
   } catch {
     return null;
   }

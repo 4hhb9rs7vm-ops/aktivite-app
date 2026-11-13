@@ -56,6 +56,7 @@ import { DailyResultReveal } from '@/components/DailyResultReveal';
 import { scheduleResultNotification } from '@/lib/notifications';
 import { track } from '@/lib/analytics';
 import { isOverlayBusy, setOverlayBusy, whenOverlayFree } from '@/lib/overlay';
+import { isFirstDay } from '@/lib/firstRun';
 import { checkBadges } from '@/lib/badges';
 import { POINTS_HIT, pointsChanged, submitPrediction } from '@/lib/prediction';
 
@@ -165,7 +166,9 @@ export function DailyQuestionGate() {
     checking.current = true;
     try {
       const l: Lang = (await loadLang()) ?? 'tr';
-      const pending = await findPendingReveal(l, TEST_MODE);
+      let pending = await findPendingReveal(l, TEST_MODE);
+      // 1.5.4 (26): İlk gün, cevap vermediği bir sorunun sonucunu gösterme (yeni kullanıcıya fazla pencere)
+      if (pending && !pending.myKey && !TEST_MODE && (await isFirstDay())) pending = null;
       if (pending) {
         // Başka bir pencere (Kampüs Ligi, rozet) açıksa kapanmasını bekle
         if (isOverlayBusy('gate')) {

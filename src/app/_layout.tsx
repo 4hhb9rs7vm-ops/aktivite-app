@@ -8,6 +8,7 @@ import { getNotifications, scheduleDailyMoments } from '@/lib/notifications';
 import { startAnalytics, track } from '@/lib/analytics';
 import { openTabFromNotification, registerPushToken, tabForNotification } from '@/lib/ask';
 import { DailyQuestionGate } from '@/components/DailyQuestionGate';
+import { initFirstRun } from '@/lib/firstRun';
 import { BadgeCelebration } from '@/components/BadgeCelebration';
 import { CampusLeagueHost } from '@/components/CampusLeague';
 
@@ -17,6 +18,7 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {
   useEffect(() => {
+    initFirstRun().catch(() => {}); // 1.5.4 (26): ilk gün sakin akış için kurulum günü (önce bu okunmalı)
     // Güvenlik ağı: bir şey ters giderse açılış ekranı en geç 6 saniyede kapansın
     const fallback = setTimeout(() => {
       SplashScreen.hideAsync().catch(() => {});

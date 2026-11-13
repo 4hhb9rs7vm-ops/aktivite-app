@@ -111,7 +111,7 @@ export type PointsItem = {
   info: string | null; // alt satır (an: "aktivite|saat", soru/tahmin: soru metni)
   infoEn: string | null;
 };
-export type PointsByKind = { moment: number; question: number; guess: number; streak: number; badge: number };
+export type PointsByKind = { moment: number; question: number; guess: number; streak: number; badge: number; welcome: number };
 export const STREAK_STEPS: { day: number; points: number }[] = [
   { day: 3, points: 10 },
   { day: 7, points: 30 },
@@ -196,6 +196,7 @@ export async function fetchPredictionWeeks(force = false): Promise<PredictionWee
         guess: Number(d.by_kind?.guess) || 0,
         streak: Number(d.by_kind?.streak) || 0,
         badge: Number(d.by_kind?.badge) || 0,
+        welcome: Number(d.by_kind?.welcome) || 0,
       },
       streak: Number(d.streak) || 0,
       history,
@@ -233,6 +234,26 @@ export async function pendingWeeklyResult(): Promise<PredictionWeek | null> {
 
 export async function markWeeklyResultSeen(week: string) {
   await AsyncStorage.setItem(WEEK_SEEN_KEY, week).catch(() => {});
+}
+
+// ---------------------------------------------------------------- hoş geldin puanı (1.5.4 (26))
+// Yeni kullanıcı Anketler'e ilk girdiğinde bir kez 50 puan. Sunucuya user_badges'e 'bonus_welcome' olarak yazılır.
+export const WELCOME_POINTS = 50;
+const WELCOME_CLAIMED_KEY = 'welcome_points_v1';
+export async function claimWelcomePoints(): Promise<boolean> {
+  try {
+    if (await AsyncStorage.getItem(WELCOME_CLAIMED_KEY)) return false;
+    if (!(await ensureSession())) return false;
+    const { error } = await supabase
+      .from('user_badges')
+      .upsert([{ badge_id: 'bonus_welcome' }], { onConflict: 'user_id,badge_id', ignoreDuplicates: true });
+    if (error) return false;
+    await AsyncStorage.setItem(WELCOME_CLAIMED_KEY, '1').catch(() => {});
+    pointsChanged();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------- rozet puanları

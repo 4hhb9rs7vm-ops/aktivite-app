@@ -22,11 +22,14 @@ import {
   PointsItem,
   PredictionWeeks,
   syncBadges,
+  claimWelcomePoints,
+  WELCOME_POINTS,
 } from '@/lib/prediction';
 import { awardBadges, BADGES } from '@/lib/badges';
 import { istanbulToday } from '@/lib/dailyQuestion';
 import { DOWNLOAD_URL } from '@/lib/campus';
-import { setOverlayBusy, whenOverlayFree } from '@/lib/overlay';
+import { celebratedThisSession, noteCelebration, setOverlayBusy, whenOverlayFree } from '@/lib/overlay';
+import { isFirstDay, isNewUser } from '@/lib/firstRun';
 import { track } from '@/lib/analytics';
 
 const NAVY = '#0F1530';
@@ -40,9 +43,12 @@ const F = { regular: 'DMSans_400Regular', medium: 'DMSans_500Medium', bold: 'DMS
 
 const tr = (lang: Lang) => (lang as string) === 'tr';
 
+// 1.5.4 (26): Ana ekrandaki "X günlük seri" ile aynı sayı (telefondaki an geçmişi). Panel bunu gösterir.
+export type LocalStreak = { count: number; doneToday: boolean };
+
 // ======================================================================== ana ekran hapı
 // Sade: "🎯 175". Puan artınca bir kez hafifçe parlar. Dokununca puan paneli.
-export function PredictionChip({ lang, style }: { lang: Lang; style?: object }) {
+export function PredictionChip({ lang, style, streak }: { lang: Lang; style?: object; streak?: LocalStreak }) {
   const [data, setData] = useState<PredictionWeeks | null>(null);
   const [open, setOpen] = useState(false);
   const pulse = useRef(new Animated.Value(0)).current;
@@ -101,7 +107,7 @@ export function PredictionChip({ lang, style }: { lang: Lang; style?: object }) 
           </Text>
         </Pressable>
       </Animated.View>
-      {open ? <PredictionSheet lang={lang} data={data} onClose={() => setOpen(false)} /> : null}
+      {open ? <PredictionSheet lang={lang} data={data} streak={streak} onClose={() => setOpen(false)} /> : null}
     </>
   );
 }
@@ -113,6 +119,7 @@ const KIND_TR: Record<string, string> = {
   guess_hit: 'Tahmin tuttu',
   guess_miss: 'Tahmine katıldın',
   badge: 'Rozet',
+  welcome: 'Hoş geldin puanı',
 };
 const KIND_EN: Record<string, string> = {
   question: 'Question of the Day',
@@ -120,6 +127,7 @@ const KIND_EN: Record<string, string> = {
   guess_hit: 'Guess was right',
   guess_miss: 'Played the guess',
   badge: 'Badge',
+  welcome: 'Welcome points',
 };
 const KIND_ICON: Record<string, { e: string; bg: string }> = {
   question: { e: '💬', bg: '#F1F0FD' },
@@ -128,6 +136,7 @@ const KIND_ICON: Record<string, { e: string; bg: string }> = {
   guess_miss: { e: '🎲', bg: '#F3F4F8' },
   streak: { e: '🔥', bg: '#FDEEE2' },
   badge: { e: '🏅', bg: '#FDEEE2' },
+  welcome: { e: '🎁', bg: '#FDEEE2' },
 };
 
 function itemTitle(it: PointsItem, lang: Lang): string {
@@ -154,6 +163,7 @@ function itemSub(it: PointsItem, lang: Lang): string | null {
   }
   if (it.kind === 'streak') return T ? 'Seri bonusu' : 'Streak bonus';
   if (it.kind === 'badge') return T ? 'Rozet puanı' : 'Badge points';
+  if (it.kind === 'welcome') return T ? 'Hoş geldin hediyesi' : 'Welcome gift';
   return null;
 }
 
@@ -189,7 +199,18 @@ function todayIndex(): number {
 const DAY_SHORT_TR = ['Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct', 'Pz'];
 const DAY_SHORT_EN = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
-export function PredictionSheet({ lang, data, onClose }: { lang: Lang; data: PredictionWeeks; onClose: () => void }) {
+export function PredictionSheet({
+  lang,
+  data,
+  streak: local,
+  onClose,
+}: {
+  lang: Lang;
+  data: PredictionWeeks;
+  streak?: LocalStreak;
+  onClose: () => void;
+}) {
+  const [hdrSize, setHdrSize] = useState<{ w: number; h: number } | null>(null);
   const insets = useSafeAreaInsets();
   const [howOpen, setHowOpen] = useState(false);
   useEffect(() => {
@@ -209,20 +230,23 @@ export function PredictionSheet({ lang, data, onClose }: { lang: Lang; data: Pre
 
   // Seri
   const today = istanbulToday();
-  const todayActive = data.history.some((h) => h.day === today && (h.kind === 'moment' || h.kind === 'question'));
-  const next = nextStreakStep(data.streak);
-  const ringPct = next ? Math.min(1, data.streak / next.day) : 1;
+  const streakN = local ? local.count : data.streak;
+  const todayActive = local
+    ? local.doneToday
+    : data.history.some((h) => h.day === today && (h.kind === 'moment' || h.kind === 'question'));
+  const next = nextStreakStep(streakN);
+  const ringPct = next ? Math.min(1, streakN / next.day) : 1;
   let streakTitle: string;
   let streakSub: string;
-  if (data.streak === 0) {
+  if (streakN === 0) {
     streakTitle = T ? 'Seri başlat' : 'Start a streak';
     streakSub = T ? '3 gün üst üste gel, +10 puan kazan' : 'Come back 3 days in a row for +10';
   } else if (!next) {
-    streakTitle = T ? `🔥 ${data.streak} gün üst üste` : `🔥 ${data.streak} days in a row`;
+    streakTitle = T ? `🔥 ${streakN} gün üst üste` : `🔥 ${streakN} days in a row`;
     streakSub = T ? 'Bir aydan uzun seri. Çok az kişi bunu yapıyor.' : 'Over a month. Very few people get here.';
   } else {
-    streakTitle = T ? `🔥 ${data.streak} gün üst üste` : `🔥 ${data.streak} ${data.streak === 1 ? 'day' : 'days'} in a row`;
-    const left = next.day - data.streak;
+    streakTitle = T ? `🔥 ${streakN} gün üst üste` : `🔥 ${streakN} ${streakN === 1 ? 'day' : 'days'} in a row`;
+    const left = next.day - streakN;
     streakSub = !todayActive
       ? T
         ? 'Bugün bir an seç ya da soruyu cevapla, seri sürsün'
@@ -239,6 +263,7 @@ export function PredictionSheet({ lang, data, onClose }: { lang: Lang; data: Pre
     { k: 'guess', label: T ? 'Tahminler' : 'Guesses', color: LAVENDER, v: data.byKind.guess },
     { k: 'badge', label: T ? 'Rozetler' : 'Badges', color: PEACH, v: data.byKind.badge },
     { k: 'streak', label: T ? 'Seri' : 'Streaks', color: '#F8D7BE', v: data.byKind.streak },
+    { k: 'welcome', label: T ? 'Hoş geldin' : 'Welcome', color: '#C7CBF7', v: data.byKind.welcome },
   ].filter((x) => x.v > 0);
 
   // Geçmiş: güne göre grupla
@@ -263,8 +288,15 @@ export function PredictionSheet({ lang, data, onClose }: { lang: Lang; data: Pre
           <View style={styles.grab} />
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
             {/* Üst kart */}
-            <View style={styles.hdr}>
-              <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
+            <View
+              style={styles.hdr}
+              onLayout={(e) => {
+                const { width, height } = e.nativeEvent.layout;
+                if (!hdrSize || Math.abs(hdrSize.w - width) > 1 || Math.abs(hdrSize.h - height) > 1) setHdrSize({ w: width, h: height });
+              }}
+            >
+              {hdrSize ? (
+              <Svg style={StyleSheet.absoluteFill} width={hdrSize.w} height={hdrSize.h}>
                 <Defs>
                   <SvgGradient id="pg" x1="0" y1="0" x2="1" y2="1">
                     <Stop offset="0" stopColor="#4B47D6" />
@@ -272,9 +304,10 @@ export function PredictionSheet({ lang, data, onClose }: { lang: Lang; data: Pre
                     <Stop offset="1" stopColor="#221F7A" />
                   </SvgGradient>
                 </Defs>
-                <Rect x="0" y="0" width="100%" height="100%" fill="url(#pg)" />
-                <Circle cx="88%" cy="0" r="100" fill="rgba(255,255,255,0.06)" />
+                <Rect x={0} y={0} width={hdrSize.w} height={hdrSize.h} fill="url(#pg)" />
+                <Circle cx={hdrSize.w * 0.88} cy={0} r={100} fill="rgba(255,255,255,0.06)" />
               </Svg>
+              ) : null}
               <View style={styles.hdrTop}>
                 <Text style={styles.hdrLabel}>{T ? 'Puanın' : 'Your points'}</Text>
                 <Text style={styles.hdrLabel}>
@@ -325,14 +358,14 @@ export function PredictionSheet({ lang, data, onClose }: { lang: Lang; data: Pre
                   <Text style={styles.streakTitle}>{streakTitle}</Text>
                   <Text style={styles.streakSub}>{streakSub}</Text>
                 </View>
-                <Ring pct={ringPct} label={next ? `${data.streak}/${next.day}` : '30+'} />
+                <Ring pct={ringPct} label={next ? `${streakN}/${next.day}` : '30+'} />
               </View>
               {next && next.day <= 7 ? (
                 <View style={styles.dots}>
                   {Array.from({ length: next.day }).map((_, i) => (
                     <View
                       key={i}
-                      style={[styles.dot, i < data.streak && styles.dotOn, i === next.day - 1 && i >= data.streak && styles.dotGoal]}
+                      style={[styles.dot, i < streakN && styles.dotOn, i === next.day - 1 && i >= streakN && styles.dotGoal]}
                     />
                   ))}
                 </View>
@@ -536,7 +569,10 @@ async function readSeen(): Promise<string[]> {
   }
 }
 
-async function pickMoment(d: PredictionWeeks): Promise<PointsMoment | null> {
+async function pickMoment(d: PredictionWeeks): Promise<{ moment: PointsMoment; persist: () => Promise<void> } | null> {
+  // 1.5.4 (26): İlk gün hiçbir puan kartı yok (tanıtım ertesi gün); bu oturumda rozet kutlandıysa da bekle
+  if (await isFirstDay()) return null;
+  if (celebratedThisSession()) return null;
   const today = istanbulToday();
   const yesterday = new Date(new Date(today + 'T12:00:00Z').getTime() - 86400000).toISOString().slice(0, 10);
   const streaks = d.history.filter((h) => h.kind === 'streak');
@@ -544,20 +580,29 @@ async function pickMoment(d: PredictionWeeks): Promise<PointsMoment | null> {
   const intro = await AsyncStorage.getItem(INTRO_KEY).catch(() => 'x');
   if (!intro) {
     // İlk kez: tanıtım. O ana kadarki seri bonusları ayrıca kutlanmaz.
-    await AsyncStorage.setItem(INTRO_KEY, today).catch(() => {});
-    await AsyncStorage.setItem(MOMENT_SEEN_KEY, JSON.stringify(streaks.map((s) => `${s.day}:${s.ref}`))).catch(() => {});
-    if (d.allTotal <= 0) return null;
-    return { kind: 'intro', total: d.allTotal };
+    const persistIntro = async () => {
+      await AsyncStorage.setItem(INTRO_KEY, today).catch(() => {});
+      await AsyncStorage.setItem(MOMENT_SEEN_KEY, JSON.stringify(streaks.map((s) => `${s.day}:${s.ref}`))).catch(() => {});
+    };
+    if (d.allTotal <= 0) {
+      await persistIntro();
+      return null;
+    }
+    return { moment: { kind: 'intro', total: d.allTotal }, persist: persistIntro };
   }
   const lastDay = await AsyncStorage.getItem(MOMENT_DAY_KEY).catch(() => null);
   if (lastDay === today) return null;
   const fresh = streaks.find((s) => (s.day === today || s.day === yesterday) && !seen.includes(`${s.day}:${s.ref}`));
   if (!fresh) return null;
-  await AsyncStorage.setItem(MOMENT_SEEN_KEY, JSON.stringify([...seen, `${fresh.day}:${fresh.ref}`].slice(-30))).catch(() => {});
-  return { kind: 'streak', day: Number(fresh.ref) || 0, points: fresh.points };
+  return {
+    moment: { kind: 'streak', day: Number(fresh.ref) || 0, points: fresh.points },
+    persist: async () => {
+      await AsyncStorage.setItem(MOMENT_SEEN_KEY, JSON.stringify([...seen, `${fresh.day}:${fresh.ref}`].slice(-30))).catch(() => {});
+    },
+  };
 }
 
-export function PointsMomentHost({ lang }: { lang: Lang }) {
+export function PointsMomentHost({ lang, streak }: { lang: Lang; streak?: LocalStreak }) {
   const [moment, setMoment] = useState<PointsMoment | null>(null);
   const [sheet, setSheet] = useState<PredictionWeeks | null>(null);
   const checking = useRef(false);
@@ -575,9 +620,13 @@ export function PointsMomentHost({ lang }: { lang: Lang }) {
     try {
       const d = await fetchPredictionWeeks();
       if (!d) return;
-      const m = await pickMoment(d);
-      if (!m) return;
+      const picked = await pickMoment(d);
+      if (!picked) return;
+      const m = picked.moment;
       whenOverlayFree(() => {
+        if (celebratedThisSession()) return; // beklerken başka bir kutlama açıldıysa bu oturumda gösterme (sonra tekrar denenir)
+        noteCelebration();
+        picked.persist().catch(() => {});
         AsyncStorage.setItem(MOMENT_DAY_KEY, istanbulToday()).catch(() => {});
         track('points_moment', { kind: m.kind, day: m.kind === 'streak' ? m.day : 0 });
         anim.setValue(0);
@@ -617,7 +666,8 @@ export function PointsMomentHost({ lang }: { lang: Lang }) {
 
   let content: { emoji: string; title: string; big: string; body: string; primary: string; secondary: string } | null = null;
   if (moment?.kind === 'streak') {
-    const n = moment.day;
+    // Kutlamada ana ekrandaki seri sayısı yazsın (sunucu 1 Kasım öncesini bilmeyebilir)
+    const n = streak && streak.count > moment.day ? streak.count : moment.day;
     const next = nextStreakStep(n);
     const bodyTr =
       n >= 30
@@ -680,7 +730,83 @@ export function PointsMomentHost({ lang }: { lang: Lang }) {
           </View>
         </Modal>
       ) : null}
-      {sheet ? <PredictionSheet lang={lang} data={sheet} onClose={() => setSheet(null)} /> : null}
+      {sheet ? <PredictionSheet lang={lang} data={sheet} streak={streak} onClose={() => setSheet(null)} /> : null}
+    </>
+  );
+}
+
+// ======================================================================== hoş geldin puanı (1.5.4 (26))
+// Yeni kullanıcı Anketler sekmesine ilk girdiğinde: "Hoş geldin puanın yüklendi · +50 puan"
+export function WelcomePointsHost({ lang, streak }: { lang: Lang; streak?: LocalStreak }) {
+  const [open, setOpen] = useState(false);
+  const [sheet, setSheet] = useState<PredictionWeeks | null>(null);
+  const anim = useRef(new Animated.Value(0)).current;
+  const T = tr(lang);
+
+  useEffect(() => {
+    setOverlayBusy('welcome_points', open);
+    return () => setOverlayBusy('welcome_points', false);
+  }, [open]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let cancelWait = () => {};
+    const t = setTimeout(async () => {
+      if (cancelled || !(await isNewUser())) return;
+      if (!(await claimWelcomePoints()) || cancelled) return;
+      cancelWait = whenOverlayFree(() => {
+        if (cancelled) return;
+        noteCelebration();
+        track('points_moment', { kind: 'welcome', day: 0 });
+        anim.setValue(0);
+        setOpen(true);
+        Animated.spring(anim, { toValue: 1, friction: 7, tension: 80, useNativeDriver: true }).start();
+        setTimeout(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}), 150);
+      }, 'welcome_points');
+    }, 700);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+      cancelWait();
+    };
+  }, [anim]);
+
+  async function openPoints() {
+    setOpen(false);
+    const d = await fetchPredictionWeeks(true);
+    if (d) setTimeout(() => setSheet(d), 350);
+  }
+
+  const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] });
+  return (
+    <>
+      {open ? (
+        <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={() => setOpen(false)}>
+          <View style={styles.momentBackdrop}>
+            <Animated.View style={[styles.momentCard, { opacity: anim, transform: [{ scale }] }]}>
+              <Text style={styles.momentEmoji}>🎁</Text>
+              <Text style={styles.momentTitle}>{T ? 'Hoş geldin puanın yüklendi' : 'Your welcome points are in'}</Text>
+              <Text style={styles.momentBig}>{T ? `+${WELCOME_POINTS} puan` : `+${WELCOME_POINTS} points`}</Text>
+              <Text style={styles.momentBody}>
+                {T
+                  ? 'Her gün an seç, Günün Sorusu’nu cevapla, çoğunluğu tahmin et; puanın birikir. Puanlarını ana ekrandaki 🎯 hapında görürsün.'
+                  : 'Pick a moment, answer the Question of the Day and guess the majority every day to grow your points. Find them in the 🎯 pill on the home screen.'}
+              </Text>
+              <Pressable
+                style={({ pressed }) => [styles.momentBtn, pressed && { opacity: 0.85 }]}
+                onPress={() => setOpen(false)}
+                accessibilityRole="button"
+              >
+                <Text style={styles.momentBtnText}>{T ? 'Harika!' : 'Nice!'}</Text>
+              </Pressable>
+              <Pressable onPress={openPoints} hitSlop={10} accessibilityRole="button">
+                <Text style={styles.momentLink}>{T ? 'Puanlarımı gör' : 'See my points'}</Text>
+              </Pressable>
+            </Animated.View>
+          </View>
+        </Modal>
+      ) : null}
+      {sheet ? <PredictionSheet lang={lang} data={sheet} streak={streak} onClose={() => setSheet(null)} /> : null}
     </>
   );
 }
@@ -809,7 +935,7 @@ function Stat({ n, label }: { n: string; label: string }) {
 }
 
 const styles = StyleSheet.create({
-  hdr: { borderRadius: 24, overflow: 'hidden', paddingHorizontal: 18, paddingTop: 16, paddingBottom: 12 },
+  hdr: { borderRadius: 24, overflow: 'hidden', backgroundColor: '#3431B0', paddingHorizontal: 18, paddingTop: 16, paddingBottom: 12 },
   hdrTop: { flexDirection: 'row', justifyContent: 'space-between' },
   hdrLabel: { fontFamily: F.medium, fontSize: 13, color: 'rgba(255,255,255,0.75)' },
   hdrNumRow: { flexDirection: 'row', alignItems: 'flex-end', marginTop: 4 },

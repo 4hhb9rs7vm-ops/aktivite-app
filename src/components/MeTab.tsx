@@ -471,8 +471,10 @@ export function MeTab({
               accessibilityLabel={`${r.label}${r.value ? ', ' + r.value : ''}`}
             >
               <Ionicons name={r.icon} size={20} color={SOFT} />
-              <Text style={styles.rowLabel}>{r.label}</Text>
-              <Text style={[styles.rowValue, !r.value && styles.rowChoose]} numberOfLines={1}>
+              <Text style={styles.rowLabelFixed} numberOfLines={1}>
+                {r.label}
+              </Text>
+              <Text style={[styles.rowValue, styles.rowValueFlex, !r.value && styles.rowChoose]} numberOfLines={1}>
                 {r.value || t.choose}
               </Text>
               <Ionicons name="chevron-forward" size={16} color={CHEVRON} />
@@ -984,7 +986,9 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, minHeight: 52 },
   rowLine: { borderBottomWidth: 1, borderBottomColor: LINE },
   rowLabel: { flex: 1, fontFamily: F.regular, fontSize: 15, color: INK },
+  rowLabelFixed: { flexShrink: 0, fontFamily: F.regular, fontSize: 15, color: INK }, // 1.5.4 (26): uzun değer etiketi bölmesin
   rowValue: { maxWidth: '55%', fontFamily: F.regular, fontSize: 14, color: SOFT, textAlign: 'right' },
+  rowValueFlex: { flex: 1, maxWidth: undefined },
   rowChoose: { color: ACCENT, fontFamily: F.medium },
 
   toggleCard: {

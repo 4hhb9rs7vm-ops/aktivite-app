@@ -107,8 +107,10 @@ import {
 import { FRIENDS_TAB_ENABLED, loadMe, Me, ME_KEY, onProfileChanged, saveMe, STUDENT } from '@/lib/me';
 import * as Clipboard from 'expo-clipboard';
 import { createInvite, getMyInvites, inviteUrl } from '@/lib/invite';
-import { cancelLeagueNotification, markHomeReturn } from '@/lib/campus';
-import { PointsMomentHost, PredictionChip, PredictionWeeklyHost } from '@/components/Prediction';
+import { answerStudent, cancelLeagueNotification, markHomeReturn } from '@/lib/campus';
+import { CampusSchoolPicker } from '@/components/CampusLeague';
+import { initFirstRun, resetFirstRun } from '@/lib/firstRun';
+import { PointsMomentHost, PredictionChip, PredictionWeeklyHost, WelcomePointsHost } from '@/components/Prediction';
 import { pointsChanged } from '@/lib/prediction';
 import { UNIVERSITY_OTHER } from '@/lib/universities';
 import { TAB_BAR_HEIGHT, TabBar, TabId } from '@/components/TabBar';
@@ -122,7 +124,7 @@ import { SelamCard } from '@/components/SelamCard';
 import { checkBadges } from '@/lib/badges';
 import { fetchLatestSelamSummary, onSelamChanged, SelamSummary } from '@/lib/selam';
 import { answerAsks, onOpenTab, registerPushToken } from '@/lib/ask';
-import { isOverlayBusy, setOverlayBusy } from '@/lib/overlay';
+import { isOverlayBusy, setOverlayBusy, whenOverlayFree } from '@/lib/overlay';
 import {
   deleteFriendData,
   FRIEND_MUTES_KEY,
@@ -2074,13 +2076,18 @@ function WelcomeSheet({
   lang,
   onStart,
   onInvite,
+  onStudent,
 }: {
   visible: boolean;
   lang: Lang;
   onStart: () => void;
   onInvite: () => void;
+  onStudent: (answer: 'yes' | 'no') => void;
 }) {
   const tr = lang === 'tr';
+  // 1.5.4 (26): Öğrenci sorusu hoş geldin kartının içinde (ilk girişte, ayrı pencere açmadan). Sadece Türkçe.
+  const askStudent = tr;
+  const [studentNo, setStudentNo] = useState(false);
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onStart} statusBarTranslucent>
       <View style={ws.backdrop}>
@@ -2113,16 +2120,55 @@ function WelcomeSheet({
               {tr ? 'Oranlarda kim olduğun değil, sadece toplamlar görünür.' : 'Rates show totals only, never who you are.'}
             </Text>
           </View>
+          {askStudent ? (
+            <View style={ws.studentBox}>
+              <Text style={ws.studentQ}>🎓 Üniversite öğrencisi misin?</Text>
+              <Text style={ws.studentSub}>Okulunu seçersen Kampüs Ligi’nde okulun için sayılırsın.</Text>
+              <View style={ws.studentRow}>
+                <Pressable
+                  style={({ pressed }) => [ws.studentBtn, ws.studentYes, pressed && { opacity: 0.85 }]}
+                  onPress={() => onStudent('yes')}
+                  accessibilityRole="button"
+                >
+                  <Text style={ws.studentYesText}>Evet, öğrenciyim</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [ws.studentBtn, studentNo && ws.studentNoOn, pressed && { opacity: 0.85 }]}
+                  onPress={() => {
+                    setStudentNo(true);
+                    onStudent('no');
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: studentNo }}
+                >
+                  <Text style={[ws.studentNoText, studentNo && { color: VIOLET }]}>{studentNo ? 'Hayır ✓' : 'Hayır'}</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
           <Pressable style={ws.primary} onPress={onStart} accessibilityRole="button">
             <Text style={ws.primaryText}>{tr ? 'Başlayalım' : "Let's go"}</Text>
           </Pressable>
-          <Pressable style={ws.secondary} onPress={onInvite} accessibilityRole="button">
-            <Text style={ws.secondaryText}>{tr ? 'Arkadaşını davet et' : 'Invite a friend'}</Text>
-          </Pressable>
+          {askStudent ? null : (
+            <Pressable style={ws.secondary} onPress={onInvite} accessibilityRole="button">
+              <Text style={ws.secondaryText}>{tr ? 'Arkadaşını davet et' : 'Invite a friend'}</Text>
+            </Pressable>
+          )}
         </View>
       </View>
     </Modal>
   );
+}
+
+// 1.5.4 (26): Hoş geldin kartı kapanınca (iOS'ta iki pencere üst üste açılamaz) okul seçimi
+function WelcomeSchoolPicker({ lang, onClose }: { lang: Lang; onClose: () => void }) {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setShow(true), 450);
+    return () => clearTimeout(t);
+  }, []);
+  if (!show) return null;
+  return <CampusSchoolPicker lang={(lang as string) === 'en' ? 'en' : 'tr'} onClose={onClose} />;
 }
 
 // ---- 1.3.0 (9): Paylaş ipucu (paylaş düğmesi öne çıkar, gerisi kararır) ----
@@ -2263,6 +2309,11 @@ export default function HomeScreen() {
   const [friendsTip, setFriendsTip] = useState(false);
   // 1.3.0 (9): Hoş geldin kartı ve paylaş ipucu
   const [welcomeOpen, setWelcomeOpen] = useState(false);
+  const [welcomeSchoolOpen, setWelcomeSchoolOpen] = useState(false); // 1.5.4 (26): hoş geldin → "Evet, öğrenciyim" → okul seçimi
+  // Hoş geldin kartı ve okul seçimi açıkken Günün Sorusu ve diğer pencereler beklesin
+  useEffect(() => {
+    setOverlayBusy('welcome', welcomeOpen || welcomeSchoolOpen);
+  }, [welcomeOpen, welcomeSchoolOpen]);
   const [welcomeCheck, setWelcomeCheck] = useState(0);
   const pendingShareUri = useRef<string | null>(null);
   const [shareTipRect, setShareTipRect] = useState<TipRect | null>(null);
@@ -2520,7 +2571,9 @@ export default function HomeScreen() {
 
   useEffect(() => {
     if (!FRIENDS_TAB_ENABLED) return;
-    AsyncStorage.getItem(FRIENDS_TIP_KEY)
+    // 1.5.4 (26): Yeni kullanıcıya "Yeni: Arkadaşlar" gösterilmez (kurulum günü önce okunur)
+    initFirstRun()
+      .then(() => AsyncStorage.getItem(FRIENDS_TIP_KEY))
       .then((v) => setFriendsTip(v !== '1'))
       .catch(() => {});
   }, []);
@@ -2535,24 +2588,46 @@ export default function HomeScreen() {
     if (!ready || !splashDone || selected || tab !== 'now') return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let reserved = false;
     AsyncStorage.getItem(WELCOME_KEY)
       .then((seen) => {
         if (seen || cancelled) return;
-        AsyncStorage.setItem(WELCOME_KEY, '1').catch(() => {});
+        // 1.5.4 (26): Yer ayır, Günün Sorusu hoş geldin kartından önce açılmasın
+        reserved = true;
+        setOverlayBusy('welcome', true);
         timer = setTimeout(() => {
-          if (!cancelled) setWelcomeOpen(true);
+          timer = undefined;
+          if (cancelled) return;
+          whenOverlayFree(() => {
+            AsyncStorage.setItem(WELCOME_KEY, '1').catch(() => {});
+            setWelcomeOpen(true);
+          }, 'welcome');
         }, 600);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
-      if (timer) clearTimeout(timer);
+      if (timer) {
+        clearTimeout(timer);
+        if (reserved) setOverlayBusy('welcome', false);
+      }
     };
   }, [ready, splashDone, selected, tab, welcomeCheck]);
 
   function closeWelcome() {
     tap(true);
     setWelcomeOpen(false);
+  }
+
+  // 1.5.4 (26): Hoş geldin kartındaki öğrenci sorusu
+  function studentFromWelcome(answer: 'yes' | 'no') {
+    tap();
+    answerStudent(answer).catch(() => {});
+    if (answer === 'yes') {
+      // Önce okul seçimini aç, sonra kartı kapat (arada pencere boşluğu olmasın diye bekleme yeri tutulur)
+      setWelcomeSchoolOpen(true);
+      setWelcomeOpen(false);
+    }
   }
 
   function inviteFromWelcome() {
@@ -2982,6 +3057,7 @@ export default function HomeScreen() {
     cancelLeagueNotification().catch(() => {});
     // Sıfırlanınca ilk açılış deneyimi de baştan: hoş geldin kartı, paylaş ipucu, filtre ipucu
     await AsyncStorage.multiRemove([WELCOME_KEY, SHARE_TIP_KEY, SHARE_TIP2_KEY, 'filterHintSeen']);
+    await resetFirstRun();
     setWelcomeCheck((n) => n + 1);
     if (friendsSetup && deleteFriends) {
       try {
@@ -3690,6 +3766,8 @@ export default function HomeScreen() {
     return (
       <View style={styles.homeRoot}>
         <PollsTab lang={lang} topInset={insets.top} bottomSpace={tabBottomSpace} />
+        {/* 1.5.4 (26): yeni kullanıcıya Anketler'e ilk girişte hoş geldin puanı */}
+        <WelcomePointsHost lang={lang} streak={computeStreak(history)} />
         {tabBar}
       </View>
     );
@@ -3809,10 +3887,10 @@ export default function HomeScreen() {
                 </View>
               ) : null}
               {/* 1.5.4: Tahmin Oyunu puanı */}
-              <PredictionChip lang={lang} />
+              <PredictionChip lang={lang} streak={streak} />
             </View>
             <PredictionWeeklyHost lang={lang} />
-            <PointsMomentHost lang={lang} />
+            <PointsMomentHost lang={lang} streak={streak} />
           </View>
 
           <View style={styles.homeBody}>
@@ -3978,7 +4056,16 @@ export default function HomeScreen() {
         </View>
       ) : null}
       {tabBar}
-      <WelcomeSheet visible={welcomeOpen} lang={lang} onStart={closeWelcome} onInvite={inviteFromWelcome} />
+      <WelcomeSheet
+        visible={welcomeOpen}
+        lang={lang}
+        onStart={closeWelcome}
+        onInvite={inviteFromWelcome}
+        onStudent={studentFromWelcome}
+      />
+      {welcomeSchoolOpen && !welcomeOpen ? (
+        <WelcomeSchoolPicker lang={lang} onClose={() => setWelcomeSchoolOpen(false)} />
+      ) : null}
     </View>
   );
 }
@@ -4625,6 +4712,15 @@ const styles = StyleSheet.create({
 // ---- 1.3.0 (9): Hoş geldin kartı, paylaş ipucu, boş ekran ----
 const VIOLET = '#3F3BC9';
 const ws = StyleSheet.create({
+  studentBox: { marginTop: SP.xl, backgroundColor: '#F6F6FB', borderRadius: 18, padding: SP.lg },
+  studentQ: { fontFamily: F.bold, fontSize: FS.md, color: '#16233F' },
+  studentSub: { fontFamily: F.regular, fontSize: FS.sm, lineHeight: 18, color: SOFT, marginTop: 4 },
+  studentRow: { flexDirection: 'row', gap: SP.sm, marginTop: SP.md },
+  studentBtn: { flex: 1, borderRadius: 14, paddingVertical: SP.md, alignItems: 'center', backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#E4E6EE' },
+  studentYes: { backgroundColor: '#EEF0FF', borderColor: '#EEF0FF' },
+  studentYesText: { fontFamily: F.bold, fontSize: FS.base, color: VIOLET },
+  studentNoOn: { borderColor: VIOLET },
+  studentNoText: { fontFamily: F.medium, fontSize: FS.base, color: INK },
   backdrop: { flex: 1, backgroundColor: 'rgba(8,14,36,0.55)', justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: '#ffffff',

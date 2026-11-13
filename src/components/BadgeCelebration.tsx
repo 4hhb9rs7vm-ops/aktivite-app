@@ -9,10 +9,11 @@ import { captureRef } from 'react-native-view-shot';
 import { Lang, loadLang } from '@/lib/i18n';
 import { BADGE_BY_ID, BadgeId, onNewBadges } from '@/lib/badges';
 import { track } from '@/lib/analytics';
-import { setOverlayBusy, whenOverlayFree } from '@/lib/overlay';
+import { noteCelebration, setOverlayBusy, whenOverlayFree } from '@/lib/overlay';
+import { isFirstDay } from '@/lib/firstRun';
 
 const NAVY = '#0F2A52';
-const AMBER = '#FBBF24';
+const AMBER = '#F4B88A'; // 1.5.4 (26): sarı yerine şeftali (lacivertle sarı yan yana gelmesin)
 const AMBER_FG = '#B45309';
 const F = { medium: 'DMSans_500Medium', bold: 'DMSans_700Bold' };
 
@@ -69,7 +70,13 @@ export function BadgeCelebration() {
       loadLang()
         .then((l) => setLang((l ?? 'tr') as Lang))
         .catch(() => {});
-      setQueue((q) => [...q, ...ids.filter((id) => !q.includes(id))]);
+      // 1.5.4 (26): İlk gün kutlama yok (Hoş geldin + Günün Sorusu yeter); rozet yine kazanılır, Rozetler'de görünür
+      isFirstDay()
+        .then((first) => {
+          if (first) return;
+          setQueue((q) => [...q, ...ids.filter((id) => !q.includes(id))]);
+        })
+        .catch(() => {});
     });
   }, []);
 
@@ -85,6 +92,7 @@ export function BadgeCelebration() {
     }, 500);
     function show() {
       setOverlayBusy('badge', true);
+      noteCelebration();
       setVisible(true);
       scale.setValue(0.6);
       spin.setValue(0);

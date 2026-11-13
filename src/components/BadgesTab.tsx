@@ -28,7 +28,7 @@ import { track } from '@/lib/analytics';
 import { ArchiveSheet } from '@/components/ArchiveSheet';
 
 const NAVY = '#0F2A52';
-const AMBER = '#FBBF24';
+const AMBER = '#F4B88A'; // 1.5.4 (26): sarı yerine şeftali (lacivertle sarı yan yana gelmesin)
 const AMBER_BG = '#FFF3E4';
 const AMBER_FG = '#B45309';
 const ROAD = '#E9DFCC';

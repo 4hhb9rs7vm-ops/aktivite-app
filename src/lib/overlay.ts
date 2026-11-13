@@ -16,6 +16,15 @@ export function setOverlayBusy(name: string, on: boolean): void {
   }
 }
 
+// 1.5.4 (26): Bir oturumda en fazla bir kutlama (rozet ya da puan anı) açılsın.
+let celebrated = false;
+export function noteCelebration(): void {
+  celebrated = true;
+}
+export function celebratedThisSession(): boolean {
+  return celebrated;
+}
+
 // Kendisi dışında açık pencere var mı?
 export function isOverlayBusy(except?: string): boolean {
   for (const n of busy) if (n !== except) return true;

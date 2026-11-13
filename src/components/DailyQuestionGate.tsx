@@ -40,6 +40,7 @@ import {
   fetchTodayQuestion,
   findPendingReveal,
   gateAllowedToday,
+  getAnsweredDayCount,
   getMyAnswer,
   getStreak,
   markRevealed,
@@ -56,6 +57,7 @@ import { scheduleResultNotification } from '@/lib/notifications';
 import { track } from '@/lib/analytics';
 import { isOverlayBusy, setOverlayBusy, whenOverlayFree } from '@/lib/overlay';
 import { checkBadges } from '@/lib/badges';
+import { POINTS_HIT, pointsChanged, submitPrediction } from '@/lib/prediction';
 
 // index.tsx'teki açılış ekranı 3,5 sn sürüyor. Kart, ana ekran kısa bir an göründükten sonra gelsin.
 const SHOW_DELAY_MS = 4300;
@@ -76,14 +78,21 @@ const OPTION_BG = '#F3F4F8';
 const F = { regular: 'DMSans_400Regular', medium: 'DMSans_500Medium', bold: 'DMSans_700Bold' };
 const SCREEN_H = Dimensions.get('window').height;
 
-type Phase = 'question' | 'sending' | 'done' | 'error';
+type Phase = 'question' | 'sending' | 'predict' | 'predicting' | 'done' | 'error';
 
 const TEXT = {
   tr: {
     intro: 'Başlamadan önce kısa bir soru',
     label: 'GÜNÜN SORUSU',
-    day: (n: number) => `Gün ${n}`,
+    day: (n: number) => `${n}. günün`,
     hint: "Herkese aynı soru. Sonuç akşam 21:00'de.",
+    predictLabel: 'TAHMİN ET 🎯',
+    predictQ: "Sence Türkiye'nin çoğunluğu ne dedi?",
+    predictHint: (p: number) => `Bilirsen +${p} puan. Sonuç 21:00'de.`,
+    yourAnswer: 'Senin cevabın',
+    predictSkip: 'Tahmin etmeden geç',
+    yourPrediction: (o: string) => `🎯 Tahminin: ${o}`,
+    earned: '+5 puan · Günün Sorusu',
     skip: 'Bugün geç',
     snooze: '1 hafta sorma',
     doneTitle: 'Cevabın kaydedildi',
@@ -98,8 +107,15 @@ const TEXT = {
   en: {
     intro: 'A quick question before you start',
     label: 'QUESTION OF THE DAY',
-    day: (n: number) => `Day ${n}`,
+    day: (n: number) => `Your day ${n}`,
     hint: 'Same question for everyone. Results at 9 pm.',
+    predictLabel: 'MAKE A GUESS 🎯',
+    predictQ: 'What do you think most people said?',
+    predictHint: (p: number) => `Guess right for +${p} points. Results at 9 pm.`,
+    yourAnswer: 'Your answer',
+    predictSkip: 'Skip the guess',
+    yourPrediction: (o: string) => `🎯 Your guess: ${o}`,
+    earned: '+5 points · Question of the Day',
     skip: 'Skip today',
     snooze: "Don't ask for a week",
     doneTitle: 'Your answer is in',
@@ -130,6 +146,9 @@ export function DailyQuestionGate() {
   const [phase, setPhase] = useState<Phase>('question');
   const [picked, setPicked] = useState<string | null>(null);
   const [streak, setStreak] = useState(0);
+  const [answer, setAnswer] = useState<string | null>(null); // 1.5.4: verilen cevap (tahmin adımında gösterilir)
+  const [prediction, setPrediction] = useState<string | null>(null);
+  const [personalDay, setPersonalDay] = useState(0);
 
   const checking = useRef(false);
   const answeredNow = useRef(false); // bu kartta cevap verildi mi (kapanınca rozet kontrolü için)
@@ -177,9 +196,12 @@ export function DailyQuestionGate() {
     if (!questionText(q, l)) return; // bu dilde soru yok (ör. Korece): hiç gösterme
     if (!TEST_MODE && (await getMyAnswer(q))) return; // bugün zaten cevaplamış
     setStreak(await getStreak());
+    setPersonalDay((await getAnsweredDayCount()) + 1);
     setLang(l);
     setQuestion(q);
     setPicked(null);
+    setAnswer(null);
+    setPrediction(null);
     setPhase('question');
     // Başka bir pencere (Kampüs Ligi, rozet) açıksa kapanınca aç
     whenOverlayFree(() => {
@@ -304,9 +326,35 @@ export function DailyQuestionGate() {
     scheduleResultNotification(question.day_date, savedOption ? clubName(savedOption, lang) : null); // 21:00 bildirimi
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     setStreak(await getStreak()); // telefondaki cevap geçmişinden yeniden say (aynı gün iki kez sayılmaz)
+    // 1.5.4: önce tahmin adımı ("Sence çoğunluk ne dedi?"), sonra tamam kartı
+    setAnswer(saved);
+    setPicked(null);
+    setPhase('predict');
+    pointsChanged(); // ana ekrandaki 🎯 puan hapı yenilensin
+  }
+
+  function showDone() {
     setPhase('done');
     doneAnim.setValue(0);
     Animated.spring(doneAnim, { toValue: 1, useNativeDriver: true, speed: 14, bounciness: 8 }).start();
+  }
+
+  async function predict(key: string) {
+    if (!question || phase !== 'predict') return;
+    Haptics.selectionAsync().catch(() => {});
+    setPicked(key);
+    setPhase('predicting');
+    const saved = await submitPrediction(question, key);
+    // Tahmin gönderilemese de akış durmasın; tamam kartında tahmin satırı görünmez
+    setPrediction(saved);
+    setPicked(answer);
+    showDone();
+  }
+
+  function skipPrediction() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    setPicked(answer);
+    showDone();
   }
 
   async function onSkip() {
@@ -325,8 +373,8 @@ export function DailyQuestionGate() {
 
   // Koyu alana dokunmak: cevap verildiyse kapat, verilmediyse "Bugün geç" say
   function onBackdrop() {
-    if (phase === 'sending') return;
-    if (phase === 'done') close();
+    if (phase === 'sending' || phase === 'predicting') return;
+    if (phase === 'done' || phase === 'predict') close();
     else onSkip();
   }
 
@@ -338,6 +386,9 @@ export function DailyQuestionGate() {
 
   const qText = questionText(question, lang) ?? question.question_tr;
   const pickedOption = question.options.find((o) => o.key === picked) ?? null;
+  const answerOption = question.options.find((o) => o.key === answer) ?? null;
+  const predictionOption = question.options.find((o) => o.key === prediction) ?? null;
+  const predicting = phase === 'predict' || phase === 'predicting';
   const club = pickedOption ? clubName(pickedOption, lang) : null;
   const doneScale = doneAnim.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] });
 
@@ -354,20 +405,37 @@ export function DailyQuestionGate() {
               <ChatCircleDots size={23} color={AMBER_FG} weight="duotone" />
             </View>
             <Text style={styles.intro}>{tx.intro}</Text>
-            {question.series_day ? (
+            {personalDay > 0 ? (
               <View style={styles.dayPill}>
-                <Text style={styles.dayPillText}>{tx.day(question.series_day)}</Text>
+                <Text style={styles.dayPillText}>{tx.day(personalDay)}</Text>
               </View>
             ) : null}
           </View>
 
-          <View style={styles.head}>
-            <View style={styles.labelPill}>
-              <Text style={styles.label}>{tx.label}</Text>
+          {predicting ? (
+            <View style={styles.head}>
+              <View style={[styles.labelPill, styles.predictPill]}>
+                <Text style={[styles.label, styles.predictLabel]}>{tx.predictLabel}</Text>
+              </View>
+              <Text style={styles.question}>{tx.predictQ}</Text>
+              <Text style={styles.hint}>{tx.predictHint(POINTS_HIT)}</Text>
+              {answerOption ? (
+                <View style={styles.answerChip}>
+                  <Text style={styles.answerChipText} numberOfLines={1}>
+                    {tx.yourAnswer}: <Text style={{ fontFamily: F.bold }}>{optionLabel(answerOption, lang)}</Text>
+                  </Text>
+                </View>
+              ) : null}
             </View>
-            <Text style={styles.question}>{qText}</Text>
-            <Text style={styles.hint}>{tx.hint}</Text>
-          </View>
+          ) : (
+            <View style={styles.head}>
+              <View style={styles.labelPill}>
+                <Text style={styles.label}>{tx.label}</Text>
+              </View>
+              <Text style={styles.question}>{qText}</Text>
+              <Text style={styles.hint}>{tx.hint}</Text>
+            </View>
+          )}
 
           {phase === 'done' ? (
             <Animated.View style={[styles.doneCard, { opacity: doneAnim, transform: [{ scale: doneScale }] }]}>
@@ -375,6 +443,14 @@ export function DailyQuestionGate() {
               <Text style={styles.doneTitle}>{tx.doneTitle}</Text>
               {pickedOption ? <Text style={styles.donePicked}>{optionLabel(pickedOption, lang)}</Text> : null}
               <Text style={styles.doneText}>{club ? tx.doneClub(club) : tx.doneGeneric}</Text>
+              {answeredNow.current ? <Text style={styles.earned}>{tx.earned}</Text> : null}
+              {predictionOption ? (
+                <View style={styles.predictionRow}>
+                  <Text style={styles.predictionText} numberOfLines={2}>
+                    {tx.yourPrediction(optionLabel(predictionOption, lang))}
+                  </Text>
+                </View>
+              ) : null}
               {streak > 1 ? (
                 <View style={styles.streakRow}>
                   <Fire size={18} color={AMBER_FG} weight="fill" />
@@ -390,8 +466,8 @@ export function DailyQuestionGate() {
                 return (
                   <Pressable
                     key={o.key}
-                    onPress={() => pick(o.key)}
-                    disabled={phase === 'sending'}
+                    onPress={() => (predicting ? predict(o.key) : pick(o.key))}
+                    disabled={phase === 'sending' || phase === 'predicting'}
                     accessibilityRole="button"
                     accessibilityState={{ selected: active }}
                     style={({ pressed }) => [
@@ -406,7 +482,7 @@ export function DailyQuestionGate() {
                     <Text style={[styles.optionText, active && styles.optionTextActive]}>
                       {optionLabel(o, lang)}
                     </Text>
-                    {active && phase === 'sending' ? <ActivityIndicator color="#ffffff" /> : null}
+                    {active && (phase === 'sending' || phase === 'predicting') ? <ActivityIndicator color="#ffffff" /> : null}
                   </Pressable>
                 );
               })}
@@ -425,6 +501,12 @@ export function DailyQuestionGate() {
             <Pressable onPress={close} style={styles.continueBtn} accessibilityRole="button">
               <Text style={styles.continueText}>{tx.continue}</Text>
             </Pressable>
+          ) : predicting ? (
+            <View style={styles.footer}>
+              <Pressable onPress={skipPrediction} style={styles.footerBtn} accessibilityRole="button" disabled={phase === 'predicting'}>
+                <Text style={styles.footerText}>{tx.predictSkip}</Text>
+              </Pressable>
+            </View>
           ) : (
             <View style={styles.footer}>
               <Pressable onPress={onSkip} style={styles.footerBtn} accessibilityRole="button">
@@ -443,6 +525,7 @@ export function DailyQuestionGate() {
 }
 
 const styles = StyleSheet.create({
+  earned: { fontFamily: 'DMSans_500Medium', fontSize: 12.5, color: '#3F3BC9', marginTop: 8, textAlign: 'center' },
   root: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -601,6 +684,24 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#ffffff',
   },
+  predictPill: { backgroundColor: '#EEEDFB' },
+  predictLabel: { color: '#3F3BC9' },
+  answerChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: OPTION_BG,
+    maxWidth: '100%',
+  },
+  answerChipText: { fontFamily: F.medium, fontSize: 14, color: INK },
+  predictionRow: {
+    marginTop: 2,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#EEEDFB',
+  },
+  predictionText: { fontFamily: F.bold, fontSize: 15, color: '#3F3BC9', textAlign: 'center' },
   doneCard: {
     marginTop: 20,
     padding: 22,

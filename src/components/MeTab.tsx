@@ -37,7 +37,7 @@ import {
 } from '@/lib/me';
 import { TERMS_URLS } from '@/lib/friends';
 import { searchUniversities, UNIVERSITY_OTHER } from '@/lib/universities';
-import { CampusLeagueCard } from '@/components/CampusLeague';
+import { CampusLeagueCard, CampusSchoolPicker } from '@/components/CampusLeague';
 import { track } from '@/lib/analytics';
 
 // Uygulamayı paylaş: telefona göre doğru mağazayı açan indirme sayfası
@@ -249,6 +249,8 @@ export function MeTab({
 }) {
   const t = T[lang];
   const [picker, setPicker] = useState<PickerId | null>(null);
+  // 1.5.3: Üniversite seçimi Kampüs Ligi'nin tam ekran seçicisiyle (onay kutusu dahil)
+  const [schoolOpen, setSchoolOpen] = useState(false);
   const [nameOpen, setNameOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
 
@@ -268,7 +270,7 @@ export function MeTab({
     onMeChange(next);
     setPicker(null);
     // "Öğrenci" seçilince üniversite seçimi hemen açılsın
-    if (v === STUDENT && !me.university) setTimeout(() => setPicker('university'), 350);
+    if (v === STUDENT && !me.university) setTimeout(() => setSchoolOpen(true), 350);
   }
 
   // ---- Seçici içerikleri ----
@@ -390,6 +392,10 @@ export function MeTab({
 
   const openPicker = (p: PickerId) => {
     tap(true);
+    if (p === 'university') {
+      setSchoolOpen(true);
+      return;
+    }
     setPicker(p);
   };
 
@@ -648,6 +654,8 @@ export function MeTab({
         onClose={() => setPicker(null)}
         key={picker ?? 'none'}
       />
+
+      {schoolOpen ? <CampusSchoolPicker lang={lang} onClose={() => setSchoolOpen(false)} /> : null}
 
       <ResetDialog
         visible={resetOpen}

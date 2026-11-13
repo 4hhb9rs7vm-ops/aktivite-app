@@ -18,6 +18,8 @@ export const DOWNLOAD_URL = 'https://4hhb9rs7vm-ops.github.io/aktivite-app/indir
 
 const OPENS_KEY = 'app_opens_v1'; // { n, lastAt }
 const STUDENT_KEY = 'student_asked_v1'; // 'yes' | 'no'
+const FIRST_RESULT_KEY = 'first_result_seen_v1'; // 1.5.3: ilk sonucu görüp ana ekrana döndü mü
+const REASK_KEY = 'school_reask_v1'; // 1.5.3: "Evet" deyip okul seçmeyene bir kez daha okul seçimi açıldı mı
 const CAMPUS_KEY = 'campus_league_v1'; // { uni, day, lockShown, resultWeek }
 const OPEN_GAP_MS = 10 * 60 * 1000; // 10 dakikadan kısa arka plan dönüşü yeni giriş sayılmaz
 const LEAGUE_NOTIF_ID = 'kampus-ligi-pazartesi';
@@ -110,10 +112,30 @@ export async function noteAppOpen(): Promise<number> {
   return st.n;
 }
 
+// ---------------------------------------------------------------- ana ekrana dönüş
+// 1.5.3: Kişi sonuç ekranından ana ekrana dönünce haber verilir; öğrenci sorusu ilk açılışta bu andan sonra sorulur.
+const homeListeners = new Set<() => void>();
+export function onHomeReturn(cb: () => void): () => void {
+  homeListeners.add(cb);
+  return () => {
+    homeListeners.delete(cb);
+  };
+}
+export async function markHomeReturn(): Promise<void> {
+  await AsyncStorage.setItem(FIRST_RESULT_KEY, '1').catch(() => {});
+  homeListeners.forEach((cb) => {
+    try {
+      cb();
+    } catch {}
+  });
+}
+
 // ---------------------------------------------------------------- öğrenci sorusu
-// 2. girişten itibaren bir kez: okul seçmemiş, meslek olarak başka bir şey seçmemiş ve daha önce cevaplamamış herkese.
+// Bir kez: ilk sonucunu görüp ana ekrana dönmüş (ya da 2. kez açmış), okul seçmemiş,
+// meslek olarak başka bir şey seçmemiş ve daha önce cevaplamamış herkese.
 export async function shouldAskStudent(opens: number): Promise<boolean> {
-  if (opens < 2) return false;
+  const seen = (await AsyncStorage.getItem(FIRST_RESULT_KEY).catch(() => null)) === '1';
+  if (opens < 2 && !seen) return false;
   const asked = await AsyncStorage.getItem(STUDENT_KEY).catch(() => null);
   if (asked) return false;
   const me = await loadMe();
@@ -125,6 +147,23 @@ export async function shouldAskStudent(opens: number): Promise<boolean> {
 export async function answerStudent(answer: 'yes' | 'no'): Promise<void> {
   await AsyncStorage.setItem(STUDENT_KEY, answer).catch(() => {});
   track('student_prompt', { answer });
+  // 1.5.3: "Evet" diyenin mesleği hemen Öğrenci olur; okul seçmeden çıksa bile kalır
+  if (answer === 'yes') {
+    const me = await loadMe();
+    if (me.occupation !== STUDENT) await saveMe({ ...me, occupation: STUDENT });
+  }
+}
+
+// 1.5.3: "Evet" deyip okul seçmeden çıkana bir sonraki açılışta bir kez daha (soru sormadan) okul seçimi açılır
+export async function shouldReaskSchool(): Promise<boolean> {
+  const asked = await AsyncStorage.getItem(STUDENT_KEY).catch(() => null);
+  if (asked !== 'yes') return false;
+  if (await AsyncStorage.getItem(REASK_KEY).catch(() => null)) return false;
+  const me = await loadMe();
+  return me.occupation === STUDENT && !me.university;
+}
+export async function markReasked(): Promise<void> {
+  await AsyncStorage.setItem(REASK_KEY, '1').catch(() => {});
 }
 
 // Okulu kaydet: meslek "Öğrenci", üniversite, istenirse karşılaştırma onayı.

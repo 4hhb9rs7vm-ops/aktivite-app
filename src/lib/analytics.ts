@@ -40,7 +40,11 @@ export type EventName =
   | 'student_prompt'
   | 'campus_picked'
   | 'campus_lock'
-  | 'others_open';
+  | 'others_open'
+  | 'prediction_made'
+  | 'prediction_sheet'
+  | 'prediction_week'
+  | 'points_moment';
 
 type Props = Record<string, string | number | boolean | null>;
 

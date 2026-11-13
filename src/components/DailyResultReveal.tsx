@@ -41,6 +41,14 @@ import { track } from '@/lib/analytics';
 import { activityName } from '@/lib/i18n';
 import { getTier, TierId } from '@/lib/badges';
 import { fetchSelamSummary, SelamSummary } from '@/lib/selam';
+import {
+  fetchPredictionWeeks,
+  getMyPrediction,
+  invalidatePredictionCache,
+  isHit,
+  POINTS_HIT,
+  POINTS_MISS,
+} from '@/lib/prediction';
 
 
 const NAVY = '#0F2A52';
@@ -128,6 +136,9 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
   const [sharing, setSharing] = useState(false);
   const [tier, setTier] = useState<TierId | null>(null);
   const [selam, setSelam] = useState<SelamSummary | null>(null);
+  // 1.5.4: Tahmin Oyunu sonucu
+  const [prediction, setPrediction] = useState<string | null>(null);
+  const [weekPoints, setWeekPoints] = useState<number | null>(null);
   const shareRef = useRef<View>(null);
 
   const bars = useRef(question.options.map(() => new Animated.Value(0))).current;
@@ -151,6 +162,9 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
   const totalShown = crowdShown(result.total);
   const totalText = totalShown ? totalShown.toLocaleString((lang as string) === 'tr' ? 'tr-TR' : 'en-US') : null;
 
+  const predOption = prediction ? question.options.find((o) => o.key === prediction) ?? null : null;
+  const predHit = !!prediction && isHit(question, result, prediction);
+
   let verdict: 'majority' | 'minority' | 'middle' = 'middle';
   if (myPct === maxPct && myPct > 0) verdict = 'majority';
   else if (myPct === minPct || myPct < 20) verdict = 'minority';
@@ -173,6 +187,19 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
         if (s) track('selam_seen', { day: question.day_date, total: s.total });
       })
       .catch(() => {});
+    if (!watcher) {
+      getMyPrediction(question)
+        .then((p) => {
+          setPrediction(p);
+          if (p) {
+            invalidatePredictionCache();
+            fetchPredictionWeeks(true)
+              .then((w) => setWeekPoints(w ? w.current.points : null))
+              .catch(() => {});
+          }
+        })
+        .catch(() => {});
+    }
     if (autoReveal || watcher) {
       const timer = setTimeout(playResult, 150);
       return () => clearTimeout(timer);
@@ -266,11 +293,10 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
             <View style={styles.topRow}>
               <Text style={styles.brand}>ŞU AN</Text>
               <View style={{ flex: 1 }} />
-              {question.series_day ? (
-                <View style={styles.dayPill}>
-                  <Text style={styles.dayPillText}>{tx.day(question.series_day)}</Text>
-                </View>
-              ) : null}
+              {/* 1.5.4: "Gün 12/30" yerine tarih (herkesin kendi günü var, kimse geç kalmış hissetmesin) */}
+              <View style={styles.dayPill}>
+                <Text style={styles.dayPillText}>{dayLabel(question.day_date, lang)}</Text>
+              </View>
               <Pressable onPress={() => finish(null)} hitSlop={12} style={styles.closeBtn} accessibilityLabel={tx.close}>
                 <X size={20} color="#ffffff" weight="bold" />
               </Pressable>
@@ -359,6 +385,26 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
                   ) : null}
                 </Animated.View>
 
+                {/* 1.5.4: Tahmin sonucu */}
+                {!watcher && predOption ? (
+                  <Animated.View style={[styles.predCard, predHit && styles.predCardHit, { opacity: verdictAnim }]}>
+                    <Text style={styles.predTitle}>
+                      {predHit
+                        ? (lang as string) === 'tr'
+                          ? `🎯 Tahminin tuttu! +${POINTS_HIT} puan`
+                          : `🎯 You guessed it! +${POINTS_HIT} points`
+                        : (lang as string) === 'tr'
+                          ? `Tahminin tutmadı · +${POINTS_MISS} puan`
+                          : `Not this time · +${POINTS_MISS} point`}
+                    </Text>
+                    <Text style={styles.predText} numberOfLines={2}>
+                      {(lang as string) === 'tr'
+                        ? `Tahminin: "${optionLabel(predOption, lang)}"${weekPoints !== null ? ` · Bu hafta ${weekPoints} puan` : ''}`
+                        : `Your guess: "${optionLabel(predOption, lang)}"${weekPoints !== null ? ` · ${weekPoints} points this week` : ''}`}
+                    </Text>
+                  </Animated.View>
+                ) : null}
+
                 {/* 2) Paylaş (kapatmak için üstteki çarpı) */}
                 {watcher ? (
                   <Animated.View style={[styles.watchBox, { opacity: verdictAnim }]}>
@@ -422,6 +468,19 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: NAVY,
   },
+  predCard: {
+    marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    gap: 4,
+  },
+  predCardHit: { backgroundColor: 'rgba(79,70,229,0.55)', borderColor: '#A5B4FC' },
+  predTitle: { fontFamily: F.bold, fontSize: 17, color: '#ffffff' },
+  predText: { fontFamily: F.medium, fontSize: 13.5, color: 'rgba(255,255,255,0.82)' },
   watchBox: {
     marginTop: 12,
     paddingVertical: 14,

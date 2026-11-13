@@ -107,7 +107,9 @@ import {
 import { FRIENDS_TAB_ENABLED, loadMe, Me, ME_KEY, onProfileChanged, saveMe, STUDENT } from '@/lib/me';
 import * as Clipboard from 'expo-clipboard';
 import { createInvite, getMyInvites, inviteUrl } from '@/lib/invite';
-import { cancelLeagueNotification } from '@/lib/campus';
+import { cancelLeagueNotification, markHomeReturn } from '@/lib/campus';
+import { PointsMomentHost, PredictionChip, PredictionWeeklyHost } from '@/components/Prediction';
+import { pointsChanged } from '@/lib/prediction';
 import { UNIVERSITY_OTHER } from '@/lib/universities';
 import { TAB_BAR_HEIGHT, TabBar, TabId } from '@/components/TabBar';
 import { MeTab } from '@/components/MeTab';
@@ -119,7 +121,7 @@ import { BadgesTab } from '@/components/BadgesTab';
 import { SelamCard } from '@/components/SelamCard';
 import { checkBadges } from '@/lib/badges';
 import { fetchLatestSelamSummary, onSelamChanged, SelamSummary } from '@/lib/selam';
-import { answerAsks, onOpenTab } from '@/lib/ask';
+import { answerAsks, onOpenTab, registerPushToken } from '@/lib/ask';
 import { isOverlayBusy, setOverlayBusy } from '@/lib/overlay';
 import {
   deleteFriendData,
@@ -473,14 +475,23 @@ async function fetchActiveCount(): Promise<number | null> {
 }
 
 // 1.5.2: Sunucu ayarları (şimdilik sadece Ülke filtresi). Fonksiyon yoksa ya da hata olursa filtre gizli kalır.
-async function fetchAppFlags(): Promise<{ countryFilter: boolean }> {
+// 1.5.3: "Diğerleri ne yapıyor?" eşiği de sunucudan gelir (others_min). Gelmezse OTHERS_MIN kullanılır.
+type AppFlags = { countryFilter: boolean; othersMin: number };
+async function fetchAppFlags(): Promise<AppFlags> {
+  const fallback: AppFlags = { countryFilter: false, othersMin: OTHERS_MIN };
   try {
-    if (!(await ensureSession())) return { countryFilter: false };
+    if (!(await ensureSession())) return fallback;
     const { data, error } = await supabase.rpc('get_app_flags');
-    if (error || !data) return { countryFilter: false };
-    return { countryFilter: !!(data as { country_filter?: boolean }).country_filter };
+    if (error || !data) return fallback;
+    const d = data as { country_filter?: boolean; others_min?: number };
+    const n = Number(d.others_min);
+    return {
+      countryFilter: !!d.country_filter,
+      // Güvenlik için 6'nın altına inmez (oranlarda da en az 6 kişi kuralı var)
+      othersMin: Number.isFinite(n) && n > 0 ? Math.max(6, Math.round(n)) : OTHERS_MIN,
+    };
   } catch {
-    return { countryFilter: false };
+    return fallback;
   }
 }
 
@@ -1481,17 +1492,23 @@ function DashboardScreen({
 
 // ---------------------------------------------------------------------------
 // 1.5.2: "Şu an diğerleri ne yapıyor?" — sonuç kartındaki haptan açılan panel.
-// Kendiliğinden açılmaz; sadece dokununca. Az kişi varken (OTHERS_MIN altı) hap hiç görünmez.
+// Kendiliğinden açılmaz; sadece dokununca. Az kişi varken (eşiğin altı) hap hiç görünmez.
+// Eşik sunucudan gelir (get_app_flags → others_min); sunucuya ulaşılamazsa OTHERS_MIN.
 // Aktivite seçtiyse aktiviteler arasında, ruh hali seçtiyse ruh halleri arasında yüzde gösterilir
 // (sonuç kartındaki "Herkes" oranıyla aynı hesap).
 // ---------------------------------------------------------------------------
-const OTHERS_MIN = 20;
+const OTHERS_MIN = 11;
 const OTHERS_TOP = 5;
 
 type OthersItem = { id: string; pct: number; me: boolean };
 type OthersData = { total: number; items: OthersItem[]; rest: number; topIds: string[]; mood: boolean };
 
-function computeOthers(rows: DashboardRow[] | null, selectedId: string, mood: boolean): OthersData | null {
+function computeOthers(
+  rows: DashboardRow[] | null,
+  selectedId: string,
+  mood: boolean,
+  minTotal: number = OTHERS_MIN
+): OthersData | null {
   if (!rows) return null;
   const known = rows.filter((r) => ACTIVITIES_BY_ID[r.activity] && r.cnt > 0);
   // Ruh hali oranı herkese göre, aktivite oranı aktivite seçenlere göre (get_ratio ile aynı)
@@ -1503,7 +1520,7 @@ function computeOthers(rows: DashboardRow[] | null, selectedId: string, mood: bo
     list.push({ id: selectedId, cnt: 1 });
     total += 1;
   }
-  if (total < OTHERS_MIN) return null;
+  if (total < minTotal) return null;
   list.sort((a, b) => b.cnt - a.cnt);
   const top = list.slice(0, OTHERS_TOP);
   const mine = list.find((r) => r.id === selectedId);
@@ -2202,6 +2219,7 @@ export default function HomeScreen() {
 
   const [notifPrompt, setNotifPrompt] = useState(false);
   const [guessing, setGuessing] = useState(false);
+  const [pickPoints, setPickPoints] = useState(false); // 1.5.4: günün ilk anı +5 puan (sonuç kartında sessiz bir satır)
   const [guess, setGuess] = useState<number | null>(null);
   const [lock, setLock] = useState<MomentLock | null>(null);
   const [lockNotice, setLockNotice] = useState(false);
@@ -2233,6 +2251,7 @@ export default function HomeScreen() {
   const [othersRows, setOthersRows] = useState<DashboardRow[] | null>(null);
   const [othersOpen, setOthersOpen] = useState(false);
   const [countryFilterOn, setCountryFilterOn] = useState(false);
+  const [othersMin, setOthersMin] = useState<number>(OTHERS_MIN);
   const [pendingShare, setPendingShare] = useState(false);
   const [history, setHistory] = useState<MomentEntry[]>([]);
   const [endNotify, setEndNotify] = useState(false);
@@ -2453,11 +2472,21 @@ export default function HomeScreen() {
     });
   }
 
+  // 1.5.3: Bildirim izni olan herkesin bildirim adresini kaydet (izin istemez; 3 günde bir tazeler).
+  // Böylece akşam bildirimleri sadece Arkadaşlar'ı kullananlara değil, izin veren herkese ulaşır.
+  useEffect(() => {
+    const id = setTimeout(() => registerPushToken().catch(() => {}), 4000);
+    return () => clearTimeout(id);
+  }, []);
+
   // 1.5.2: Ülke filtresi sunucudan açılıp kapanır (en az 2 ülkede yeterli kişi olunca açılır; build gerekmez)
   useEffect(() => {
     let cancelled = false;
     fetchAppFlags().then((f) => {
-      if (!cancelled) setCountryFilterOn(f.countryFilter);
+      if (!cancelled) {
+        setCountryFilterOn(f.countryFilter);
+        setOthersMin(f.othersMin);
+      }
     });
     return () => {
       cancelled = true;
@@ -2817,6 +2846,8 @@ export default function HomeScreen() {
     setGuessing(true);
     pushPresence(a.id, fullProfile, consent).then(() => setRefreshKey((k) => k + 1));
     track('activity_pick', { id: a.id, moment: getTodayMoment().isOpen, first_today: firstToday, correction: graceUsed });
+    setPickPoints(firstToday && !graceUsed);
+    if (firstToday) pointsChanged();
     setTimeout(() => checkBadges().catch(() => {}), 2500); // Erkenci / Gece kuşu rozetleri
     answerAsks().catch(() => {}); // Bana "Sor" diyen arkadaşlara "cevap verdi" bildirimi
     shouldAskNotifications().then((ask) => {
@@ -2828,6 +2859,8 @@ export default function HomeScreen() {
 
   // Ana ekrana dön ama anı kilitli tut
   function goHome() {
+    // 1.5.3: Sonuç ekranından ana ekrana dönüş (öğrenci sorusu ilk açılışta bundan sonra gelir)
+    if (selected) markHomeReturn().catch(() => {});
     if (notifTimer.current) clearTimeout(notifTimer.current);
     setNotifPrompt(false);
     setSelected(null);
@@ -2836,6 +2869,7 @@ export default function HomeScreen() {
     setFilter('world');
     setRatio(null);
     setGuessing(false);
+    setPickPoints(false);
   }
 
   function acceptNotifications() {
@@ -2944,7 +2978,7 @@ export default function HomeScreen() {
   async function resetAll(deleteFriends: boolean) {
     // Not: 30 dakikalık seçim kilidi bilinçli olarak silinmez (kişisel veri değil, kural sayacı)
     const keepFriends = friendsSetup && !deleteFriends;
-    await AsyncStorage.multiRemove(['profile', 'consent', HISTORY_KEY, ME_KEY, 'student_asked_v1', 'campus_league_v1']);
+    await AsyncStorage.multiRemove(['profile', 'consent', HISTORY_KEY, ME_KEY, 'student_asked_v1', 'campus_league_v1', 'first_result_seen_v1', 'school_reask_v1', 'app_opens_v1']);
     cancelLeagueNotification().catch(() => {});
     // Sıfırlanınca ilk açılış deneyimi de baştan: hoş geldin kartı, paylaş ipucu, filtre ipucu
     await AsyncStorage.multiRemove([WELCOME_KEY, SHARE_TIP_KEY, SHARE_TIP2_KEY, 'filterHintSeen']);
@@ -3120,7 +3154,7 @@ export default function HomeScreen() {
         (f.id !== 'campus' || !!campus) &&
         (f.id !== 'country' || countryFilterOn)
     );
-    const others = computeOthers(othersRows, selected.id, !!selected.mood);
+    const others = computeOthers(othersRows, selected.id, !!selected.mood, othersMin);
     const needsProfile = filter !== 'world';
     const value = needsProfile ? fullProfile[filter as keyof Profile] : undefined;
     const picking = needsProfile && (!value || editing);
@@ -3243,6 +3277,11 @@ export default function HomeScreen() {
             </View>
             <CountUp value={pct} color={fg} lang={lang} />
             <Text style={styles.line}>{shareLine}</Text>
+            {pickPoints && !showCompare ? (
+              <Text style={styles.pickPoints}>
+                {lang === 'tr' ? '🎯 +5 puan · günün ilk anı' : '🎯 +5 points · first moment today'}
+              </Text>
+            ) : null}
             {others && !showCompare ? (
               <OthersPill data={others} fg={fg} bg={bg} lang={lang} onPress={openOthers} />
             ) : null}
@@ -3756,7 +3795,7 @@ export default function HomeScreen() {
                 </View>
               ) : null}
               {selamSummary ? (
-                <View style={[styles.momentChip, { marginTop: 0, backgroundColor: '#FBBF24' }]}>
+                <View style={[styles.momentChip, { marginTop: 0, backgroundColor: '#F4B88A' }]}>
                   <Text style={[styles.momentText, { color: '#0F2A52' }]}>
                     👋{' '}
                     {selamSummary.day === istanbulToday()
@@ -3769,7 +3808,11 @@ export default function HomeScreen() {
                   </Text>
                 </View>
               ) : null}
+              {/* 1.5.4: Tahmin Oyunu puanı */}
+              <PredictionChip lang={lang} />
             </View>
+            <PredictionWeeklyHost lang={lang} />
+            <PointsMomentHost lang={lang} />
           </View>
 
           <View style={styles.homeBody}>
@@ -3941,6 +3984,7 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  pickPoints: { fontFamily: 'DMSans_500Medium', fontSize: 12.5, color: '#3F3BC9', marginTop: 6, textAlign: 'center' },
   safe: { flex: 1, backgroundColor: '#F7F7F9' },
   bgDecor: { ...ABS_FILL, overflow: 'hidden' },
   blob: { position: 'absolute', borderRadius: 999 },

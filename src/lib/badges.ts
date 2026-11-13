@@ -63,7 +63,8 @@ export type BadgeId =
   | 'ask_1'
   | 'welcome_1'
   | 'pioneer_nov'
-  | 'explorer_5';
+  | 'explorer_5'
+  | 'sharp_eye';
 
 export type TierId = 'tier_7' | 'tier_14' | 'tier_21' | 'tier_30';
 
@@ -189,6 +190,14 @@ export const BADGES: BadgeDef[] = [
     name: { tr: 'Meraklı Kâşif', en: 'Curious Explorer' },
     how: { tr: '5 eski soruyu cevapla', en: 'Answer 5 past questions' },
     done: { tr: 'Kaçırdığın 5 soruyu keşfettin.', en: 'You explored 5 questions you missed.' },
+  },
+  // 1.5.4: Tahmin Oyunu — haftanın en iyi %10 tahmincisi (sunucu hesaplar, pazartesi verilir)
+  {
+    id: 'sharp_eye',
+    emoji: '🎯',
+    name: { tr: 'Keskin Göz', en: 'Sharp Eye' },
+    how: { tr: 'Haftanın en iyi %10 tahmincisi ol', en: "Be in the week's top 10% of guessers" },
+    done: { tr: 'Bu hafta tahmincilerin en iyi %10’undaydın.', en: "You were in this week's top 10% of guessers." },
   },
 ];
 
@@ -506,6 +515,32 @@ export function onBadgesChanged(fn: ChangeListener): () => void {
   return () => {
     changeListeners.delete(fn);
   };
+}
+
+// 1.5.4: Kazanılan rozetler ve tarihleri (rozet puanı için sunucuya yazılır)
+export async function getEarnedBadges(): Promise<Record<string, string>> {
+  return readEarned();
+}
+
+// 1.5.4: Sunucunun verdiği rozetler (ör. Keskin Göz). Yeni kazanıldıysa kaydeder ve kutlama açtırır.
+export async function awardBadges(ids: BadgeId[]): Promise<BadgeId[]> {
+  const earned = await readEarned();
+  const fresh = ids.filter((id) => !earned[id]);
+  if (fresh.length === 0) return [];
+  const day = istanbulToday();
+  for (const id of fresh) earned[id] = day;
+  await AsyncStorage.setItem(EARNED_KEY, JSON.stringify(earned)).catch(() => {});
+  listeners.forEach((fn) => {
+    try {
+      fn(fresh);
+    } catch {}
+  });
+  changeListeners.forEach((fn) => {
+    try {
+      fn();
+    } catch {}
+  });
+  return fresh;
 }
 
 let checking = false;

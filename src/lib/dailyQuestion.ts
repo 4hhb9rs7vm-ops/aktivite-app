@@ -405,6 +405,13 @@ export async function findPendingReveal(lang: Lang, force = false): Promise<Pend
   }
 }
 
+// 1.5.4: Kişisel gün sayacı — kaç farklı gün cevap verdi (seri kopsa da sayılır).
+// Herkes kendi 1. gününden başlar; soru herkese aynı kalır.
+export async function getAnsweredDayCount(): Promise<number> {
+  const all = await readLocalAnswers();
+  return Object.keys(all).length;
+}
+
 // Seri: bugünden (ya da bugün cevap yoksa dünden) geriye kesintisiz gün sayısı
 export async function getStreak(): Promise<number> {
   const all = await readLocalAnswers();

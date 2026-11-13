@@ -11,6 +11,7 @@ import {
   Animated,
   AppState,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -48,6 +49,9 @@ import {
   accusative,
   isEarly,
   statusSub,
+  onHomeReturn,
+  shouldReaskSchool,
+  markReasked,
 } from '@/lib/campus';
 import { istanbulToday } from '@/lib/dailyQuestion';
 import { loadLang } from '@/lib/i18n';
@@ -197,6 +201,7 @@ function progressWidth(st: CampusStatus): number {
 // ======================================================================== Host
 type Screen =
   | { kind: 'ask' }
+  | { kind: 'gap' } // 1.5.3: soru kapanıp okul seçimi açılana kadar başka pencere araya girmesin
   | { kind: 'pick' }
   | { kind: 'other' }
   | { kind: 'lock'; school: string; status: CampusStatus }
@@ -231,6 +236,18 @@ export function CampusLeagueHost() {
         if (!busyRef.current) {
           track('student_prompt', { answer: 'shown' });
           setScreen({ kind: 'ask' });
+        }
+      }, 'campus');
+      return;
+    }
+
+    // 1.5.3: "Evet" deyip okul seçmeden çıkana bir kez daha, doğrudan okul seçimi
+    if (await shouldReaskSchool()) {
+      whenOverlayFree(() => {
+        if (!busyRef.current) {
+          markReasked().catch(() => {});
+          track('student_prompt', { answer: 'reask' });
+          setScreen({ kind: 'pick' });
         }
       }, 'campus');
       return;
@@ -275,9 +292,17 @@ export function CampusLeagueHost() {
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'active') setTimeout(() => check().catch(() => {}), 1500);
     });
+    // 1.5.3: ilk sonucu görüp ana ekrana dönünce de bak (öğrenci sorusu ilk açılışta burada gelir)
+    let homeTimer: ReturnType<typeof setTimeout> | null = null;
+    const offHome = onHomeReturn(() => {
+      if (homeTimer) clearTimeout(homeTimer);
+      homeTimer = setTimeout(() => check().catch(() => {}), 900);
+    });
     return () => {
       clearTimeout(first);
+      if (homeTimer) clearTimeout(homeTimer);
       sub.remove();
+      offHome();
     };
   }, [check]);
 
@@ -310,8 +335,9 @@ export function CampusLeagueHost() {
           onYes={() => {
             tap();
             answerStudent('yes').catch(() => {});
-            setScreen(null);
-            // iOS: bir pencere kapanırken diğeri açılırsa görünmüyor; kapanmasını bekle
+            // iOS: bir pencere kapanırken diğeri açılırsa görünmüyor; kapanmasını bekle.
+            // Arada 'gap' ile meşgul kalıyoruz ki başka pencere (günün sorusu vb.) araya girmesin.
+            setScreen({ kind: 'gap' });
             setTimeout(() => setScreen({ kind: 'pick' }), 450);
           }}
           onNo={() => {
@@ -385,6 +411,30 @@ function AskStudent({ t, onYes, onNo }: { t: Tx; onYes: () => void; onNo: () => 
 }
 
 // ======================================================================== A2/A3 · Okul seçimi + onay
+// 1.5.3: Tam ekran. Arama en üstte (Android'de klavye listeyi kapatmasın), arama boşken popüler okullar,
+// onay ve buton altta sabit. Okula dokununca klavye kapanır.
+const POPULAR = [
+  'Karadeniz Teknik Üniversitesi',
+  'Orta Doğu Teknik Üniversitesi',
+  'İstanbul Teknik Üniversitesi',
+  'Boğaziçi Üniversitesi',
+  'Hacettepe Üniversitesi',
+  'Ankara Üniversitesi',
+  'Anadolu Üniversitesi',
+  'Ege Üniversitesi',
+  'Dokuz Eylül Üniversitesi',
+  'Gazi Üniversitesi',
+  'Yıldız Teknik Üniversitesi',
+  'İstanbul Üniversitesi',
+];
+let popularCache: string[] | null = null;
+function popularSchools(): string[] {
+  if (popularCache) return popularCache;
+  // Sadece listede birebir bulunan adlar (yazım farkı varsa göstermeyiz)
+  popularCache = POPULAR.filter((n) => searchUniversities(n).includes(n));
+  return popularCache;
+}
+
 export function SchoolPicker({
   t,
   lang,
@@ -393,7 +443,7 @@ export function SchoolPicker({
 }: {
   t: Tx;
   lang: Lang;
-  onDone: (university: string, consent: boolean) => void;
+  onDone: (university: string, consent: boolean) => void | Promise<void>;
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -401,11 +451,17 @@ export function SchoolPicker({
   const [picked, setPicked] = useState<string | null>(null);
   const [consent, setConsent] = useState(true);
   const [busy, setBusy] = useState(false);
-  const options = [...searchUniversities(q), UNIVERSITY_OTHER];
+  const query = q.trim();
+  const popular = popularSchools();
+  const base = query ? searchUniversities(query) : popular;
+  // Seçilen okul popülerde yoksa en üstte görünsün
+  const list = picked && picked !== UNIVERSITY_OTHER && !base.includes(picked) && !query ? [picked, ...base] : base;
+  const options = [...list, UNIVERSITY_OTHER];
 
   async function submit() {
     if (!picked || busy) return;
     tap();
+    Keyboard.dismiss();
     setBusy(true);
     await onDone(picked, picked === UNIVERSITY_OTHER ? false : consent);
     setBusy(false);
@@ -414,84 +470,116 @@ export function SchoolPicker({
   const btnLabel = !picked ? t.pickFirst : picked === UNIVERSITY_OTHER || consent ? t.join : t.saveNoConsent;
 
   return (
-    <Modal visible transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={t.later} />
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.pickWrap}>
-          <View style={[styles.sheet, styles.pickSheet, { paddingBottom: insets.bottom + 16 }]}>
-            <View style={styles.grab} />
-            <Text style={styles.sheetTitle}>{t.pickTitle}</Text>
+    <Modal visible transparent={false} animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={[styles.pickRoot, { paddingTop: insets.top + 8 }]}
+      >
+        <View style={styles.pickHead}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.pickTitle}>{t.pickTitle} 🎓</Text>
             <Text style={styles.sheetSub}>{t.pickSub}</Text>
-            <View style={styles.searchBox}>
-              <Ionicons name="search" size={17} color={MUTED} />
-              <TextInput
-                value={q}
-                onChangeText={setQ}
-                placeholder={t.search}
-                placeholderTextColor={MUTED}
-                style={styles.searchInput}
-                autoCorrect={false}
-                returnKeyType="search"
-              />
-            </View>
-            <FlatList
-              data={options}
-              keyExtractor={(u) => u}
-              keyboardShouldPersistTaps="handled"
-              style={{ flexGrow: 0, maxHeight: 300 }}
-              renderItem={({ item }) => {
-                const on = picked === item;
-                const label = item === UNIVERSITY_OTHER ? t.other : item;
-                return (
-                  <Pressable
-                    style={styles.item}
-                    onPress={() => {
-                      Haptics.selectionAsync().catch(() => {});
-                      setPicked(item);
-                    }}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: on }}
-                  >
-                    <Text style={[styles.itemText, on && styles.itemOn, item === UNIVERSITY_OTHER && !on && { color: MUTED }]} numberOfLines={2}>
-                      {label}
-                    </Text>
-                    {on ? (
-                      <View style={styles.check}>
-                        <Ionicons name="checkmark" size={14} color="#fff" />
-                      </View>
-                    ) : null}
-                  </Pressable>
-                );
-              }}
-            />
-            {picked !== UNIVERSITY_OTHER ? (
+          </View>
+          <Pressable onPress={onClose} hitSlop={12} style={styles.pickClose} accessibilityRole="button" accessibilityLabel={t.later}>
+            <Ionicons name="close" size={20} color={INK} />
+          </Pressable>
+        </View>
+        <View style={[styles.searchBox, styles.pickSearch]}>
+          <Ionicons name="search" size={17} color={MUTED} />
+          <TextInput
+            value={q}
+            onChangeText={setQ}
+            placeholder={t.search}
+            placeholderTextColor={MUTED}
+            style={styles.searchInput}
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {q ? (
+            <Pressable onPress={() => setQ('')} hitSlop={10} accessibilityRole="button">
+              <Ionicons name="close-circle" size={18} color={MUTED} />
+            </Pressable>
+          ) : null}
+        </View>
+        {!query && popular.length ? <Text style={styles.pickSection}>{lang === 'tr' ? 'POPÜLER' : 'POPULAR'}</Text> : null}
+        <FlatList
+          data={options}
+          keyExtractor={(u) => u}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 12 }}
+          renderItem={({ item }) => {
+            const on = picked === item;
+            const label = item === UNIVERSITY_OTHER ? t.other : item;
+            return (
               <Pressable
-                style={[styles.consent, !consent && styles.consentOff]}
+                style={[styles.pickItem, on && styles.pickItemOn]}
                 onPress={() => {
                   Haptics.selectionAsync().catch(() => {});
-                  setConsent((c) => !c);
+                  Keyboard.dismiss();
+                  setPicked(item);
                 }}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: consent }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
               >
-                <View style={[styles.box, !consent && styles.boxOff]}>
-                  {consent ? <Ionicons name="checkmark" size={13} color="#fff" /> : null}
-                </View>
-                <Text style={[styles.consentText, !consent && { color: '#7A4B00' }]}>{consent ? t.consentOn : t.consentOff}</Text>
+                <Text style={[styles.itemText, on && styles.itemOn, item === UNIVERSITY_OTHER && !on && { color: MUTED }]} numberOfLines={2}>
+                  {label}
+                </Text>
+                {on ? (
+                  <View style={styles.check}>
+                    <Ionicons name="checkmark" size={14} color="#fff" />
+                  </View>
+                ) : null}
               </Pressable>
-            ) : null}
+            );
+          }}
+        />
+        <View style={[styles.pickBottom, { paddingBottom: insets.bottom + 14 }]}>
+          {picked !== UNIVERSITY_OTHER ? (
             <Pressable
-              style={[styles.primary, !picked && styles.primaryDis, picked && picked !== UNIVERSITY_OTHER && !consent && { backgroundColor: '#6B6F7B' }]}
-              onPress={submit}
-              disabled={!picked || busy}
-              accessibilityRole="button"
+              style={[styles.consent, { marginTop: 0 }, !consent && styles.consentOff]}
+              onPress={() => {
+                Haptics.selectionAsync().catch(() => {});
+                setConsent((c) => !c);
+              }}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: consent }}
             >
-              {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>{btnLabel}</Text>}
+              <View style={[styles.box, !consent && styles.boxOff]}>
+                {consent ? <Ionicons name="checkmark" size={13} color="#fff" /> : null}
+              </View>
+              <Text style={[styles.consentText, !consent && { color: '#7A4B00' }]}>{consent ? t.consentOn : t.consentOff}</Text>
             </Pressable>
-          </View>
-        </KeyboardAvoidingView>
-      </View>
+          ) : null}
+          <Pressable
+            style={[styles.primary, !picked && styles.primaryDis, picked && picked !== UNIVERSITY_OTHER && !consent && { backgroundColor: '#6B6F7B' }]}
+            onPress={submit}
+            disabled={!picked || busy}
+            accessibilityRole="button"
+          >
+            {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>{btnLabel}</Text>}
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
+  );
+}
+
+// 1.5.3: Ben sekmesindeki üniversite satırı da bu ekranı açar (onay kutusu dahil, kayıt aynı)
+export function CampusSchoolPicker({ lang, onClose }: { lang: Lang; onClose: () => void }) {
+  const t = T[lang];
+  return (
+    <SchoolPicker
+      t={t}
+      lang={lang}
+      onClose={onClose}
+      onDone={async (university, consent) => {
+        await saveSchool(university, consent);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        onClose();
+      }}
+    />
   );
 }
 
@@ -843,7 +931,7 @@ const styles = StyleSheet.create({
   askEmoji: { fontSize: 72, marginTop: 44 },
   askTitle: { fontFamily: F.bold, fontSize: 28, lineHeight: 34, color: '#fff', textAlign: 'center', marginTop: 18 },
   askText: { fontFamily: F.regular, fontSize: 15, lineHeight: 22, color: '#C9D3EE', textAlign: 'center', marginTop: 14 },
-  askYes: { height: 56, borderRadius: 18, backgroundColor: AMBER, alignItems: 'center', justifyContent: 'center' },
+  askYes: { height: 56, borderRadius: 18, backgroundColor: '#F4B88A', alignItems: 'center', justifyContent: 'center' },
   askYesText: { fontFamily: F.bold, fontSize: 17, color: '#1B1B1B' },
   askNo: {
     height: 54,
@@ -859,6 +947,24 @@ const styles = StyleSheet.create({
   // ortak alt panel
   backdrop: { flex: 1, backgroundColor: 'rgba(10,12,30,0.45)', justifyContent: 'flex-end' },
   pickWrap: { width: '100%' },
+  pickRoot: { flex: 1, backgroundColor: '#F4F5F7' },
+  pickHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 20, paddingTop: 10 },
+  pickTitle: { fontFamily: F.bold, fontSize: 26, color: INK },
+  pickClose: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E9EAEE', alignItems: 'center', justifyContent: 'center' },
+  pickSearch: { marginHorizontal: 16, marginTop: 14, backgroundColor: '#fff', borderWidth: 2, borderColor: ACCENT },
+  pickSection: { fontFamily: F.bold, fontSize: 11.5, letterSpacing: 1, color: '#8A8E99', paddingHorizontal: 20, paddingTop: 14, paddingBottom: 6 },
+  pickItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    marginBottom: 6,
+  },
+  pickItemOn: { backgroundColor: ACCENT_BG },
+  pickBottom: { backgroundColor: '#fff', paddingHorizontal: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#E6E7EB' },
   sheet: { backgroundColor: '#fff', borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: 20, paddingTop: 12 },
   pickSheet: { maxHeight: '92%' },
   grab: { alignSelf: 'center', width: 44, height: 5, borderRadius: 3, backgroundColor: '#D9DBE1', marginBottom: 14 },

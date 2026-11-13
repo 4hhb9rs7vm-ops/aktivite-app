@@ -359,7 +359,7 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
                 >
                   <View style={styles.verdictHead}>
                     <Text style={styles.verdictTitle}>
-                      {watcher ? ((lang as string) === 'tr' ? 'Türkiye’nin cevabı' : "Everyone's answer") : tx[verdict]}
+                      {watcher ? ((lang as string) === 'tr' ? 'Şu An’ın cevabı' : "Everyone's answer") : tx[verdict]}
                     </Text>
                     <View style={styles.pctBadge}>
                       <Text style={styles.pctBadgeText}>%{myPct}</Text>

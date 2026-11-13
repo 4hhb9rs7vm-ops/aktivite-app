@@ -40,13 +40,17 @@ const ACTIVITY_NAMES: Record<string, { tr: string; en: string }> = {
   tv: { tr: 'Dizi/film izliyorum', en: 'Watching a show' },
   coffee: { tr: 'Kahve içiyorum', en: 'Having coffee' },
   gaming: { tr: 'Oyun oynuyorum', en: 'Gaming' },
-  shop: { tr: 'Alışveriş yapıyorum', en: 'Shopping' },
+  shop: { tr: 'Alışverişteyim', en: 'Shopping' },
   chores: { tr: 'Ev işi yapıyorum', en: 'Doing chores' },
-  friends: { tr: 'Arkadaşlarımla birlikteyim', en: 'With friends' },
+  friends: { tr: 'Arkadaşlarımlayım', en: 'With friends' },
   scrolling: { tr: 'Telefonda geziniyorum', en: 'On my phone' },
   resting: { tr: 'Dinleniyorum', en: 'Resting' },
-  walk: { tr: 'Yürüyüş yapıyorum', en: 'Out for a walk' },
+  walk: { tr: 'Yürüyüşteyim', en: 'Out for a walk' },
   vacation: { tr: 'Tatildeyim', en: 'On vacation' },
+  kids: { tr: 'Çocukla ilgileniyorum', en: 'Looking after kids' },
+  break: { tr: 'Moladayım', en: 'On a break' },
+  store: { tr: 'Dükkandayım', en: 'At the shop' },
+  shift: { tr: 'Vardiyadayım / nöbetteyim', en: 'On shift' },
   happy: { tr: 'Neşeliyim', en: 'Happy' },
   calm: { tr: 'Huzurluyum', en: 'At peace' },
   hurt: { tr: 'Kırgınım', en: 'Hurt' },
@@ -177,10 +181,10 @@ export function momentLabel(m: { start: Date; isOpen: boolean }, lang: Lang): st
     const h = m.start.getHours();
     const min = m.start.getMinutes();
     return lang === 'tr'
-      ? `Bugünün anı ${pad2(h)}:${pad2(min)}'${timeSuffix(h, min)}`
+      ? `Günün Anı ${pad2(h)}:${pad2(min)}'${timeSuffix(h, min)}`
       : `Today's Moment at ${pad2(h)}:${pad2(min)}`;
   }
-  return lang === 'tr' ? 'Bugünün anı geçti, yarın yeni an' : "Today's Moment has passed, new one tomorrow";
+  return lang === 'tr' ? 'Günün Anı yarın · şimdi de seçebilirsin' : "Today's Moment is tomorrow · you can still pick now";
 }
 
 const DAY_NAMES = {
@@ -264,7 +268,8 @@ export const STRINGS = {
     heroAfter: '\nne yapıyorsun?',
     heroCount: (n: string) => `Şu an ${n} kişi burada`,
     dashEntry: (n: string) => `🌍 Şu an ${n} kişi aktif · Canlı panoyu gör`,
-    sectionTop: 'Bu saatte en olası aktiviteler',
+    sectionTop: 'Bu saatte',
+    sectionTopSub: 'saate ve sana göre',
     sectionOthers: 'Diğer aktiviteler',
     sectionMood: 'Ruh halim',
     resetLink: 'Kayıtlı bilgilerimi sıfırla',
@@ -335,7 +340,8 @@ export const STRINGS = {
     heroAfter: '\ndoing right now?',
     heroCount: (n: string) => `${n} people here right now`,
     dashEntry: (n: string) => `🌍 ${n} people active now · See the live board`,
-    sectionTop: 'Most likely right now',
+    sectionTop: 'Right now',
+    sectionTopSub: 'by time and your habits',
     sectionOthers: 'Other activities',
     sectionMood: 'My mood',
     resetLink: 'Reset my saved info',

@@ -88,7 +88,7 @@ const TEXT = {
     day: (n: number) => `${n}. günün`,
     hint: "Herkese aynı soru. Sonuç akşam 21:00'de.",
     predictLabel: 'TAHMİN ET 🎯',
-    predictQ: "Sence Türkiye'nin çoğunluğu ne dedi?",
+    predictQ: "Sence Şu An'daki çoğunluk ne dedi?",
     predictHint: (p: number) => `Bilirsen +${p} puan. Sonuç 21:00'de.`,
     yourAnswer: 'Senin cevabın',
     predictSkip: 'Tahmin etmeden geç',

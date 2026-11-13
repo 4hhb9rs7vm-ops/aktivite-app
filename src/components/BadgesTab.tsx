@@ -282,10 +282,10 @@ export function BadgesTab({ lang, topInset, bottomSpace, onOpenPolls }: Props) {
         <Pressable
           key={d.n}
           onPress={openArchive}
-          style={[styles.node, styles.nodeMissed, { left: x - 20, top: y - 20 }]}
+          style={[styles.node, d.pre ? styles.nodePre : styles.nodeMissed, { left: x - 20, top: y - 20 }]}
           accessibilityRole="button"
         >
-          <Text style={styles.nodeMissedText}>{d.n}</Text>
+          <Text style={d.pre ? styles.nodePreText : styles.nodeMissedText}>{d.n}</Text>
         </Pressable>
       );
     }
@@ -520,6 +520,8 @@ const styles = StyleSheet.create({
   archiveBtnText: { fontFamily: F.bold, fontSize: 15, color: '#FFFFFF' },
   nodeMissed: { backgroundColor: '#F3EEE6', borderWidth: 2, borderColor: '#E0D6C4' },
   nodeMissedText: { fontFamily: F.bold, fontSize: 15, color: '#C2B8A6', textDecorationLine: 'line-through' },
+  nodePre: { backgroundColor: '#F4F5F9', borderWidth: 2, borderColor: '#E4E6EE' },
+  nodePreText: { fontFamily: F.bold, fontSize: 15, color: '#B4B8C4' },
   nodeLocked: { backgroundColor: '#ffffff', borderWidth: 2, borderColor: ROAD },
   nodeLockedText: { fontFamily: F.bold, fontSize: 15, color: '#A0A4B0' },
   todayNode: {

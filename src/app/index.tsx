@@ -29,6 +29,7 @@ import { Circle, Defs, LinearGradient, Path, RadialGradient, Rect, Stop, Svg } f
 import {
   Airplane,
   Armchair,
+  Baby,
   Barbell,
   Bed,
   BookOpen,
@@ -37,6 +38,7 @@ import {
   Broom,
   Cake,
   Car,
+  ClockClockwise,
   Coffee,
   CookingPot,
   DeviceMobile,
@@ -51,11 +53,13 @@ import {
   Hourglass,
   Leaf,
   MapPin,
+  PauseCircle,
   PersonSimpleWalk,
   ShoppingCart,
   Smiley,
   SmileyAngry,
   SmileySad,
+  Storefront,
   Television,
   Thermometer,
   UsersThree,
@@ -377,13 +381,18 @@ const ACTIVITIES: Activity[] = [
   { id: 'tv', name: 'Dizi/film izliyorum', icon: Television, ...PALETTE.rose, world: 7, country: 8, peaks: [{ hour: 21, spread: 3 }] },
   { id: 'coffee', name: 'Kahve içiyorum', icon: Coffee, ...PALETTE.amber, world: 5, country: 6, peaks: [{ hour: 9, spread: 2.5 }] },
   { id: 'gaming', name: 'Oyun oynuyorum', icon: GameController, ...PALETTE.rose, world: 9, country: 6, peaks: [{ hour: 22, spread: 4 }] },
-  { id: 'shop', name: 'Alışveriş yapıyorum', icon: ShoppingCart, ...PALETTE.amber, world: 3.5, country: 3, peaks: [{ hour: 15, spread: 4 }] },
+  { id: 'shop', name: 'Alışverişteyim', icon: ShoppingCart, ...PALETTE.amber, world: 3.5, country: 3, peaks: [{ hour: 15, spread: 4 }] },
   { id: 'chores', name: 'Ev işi yapıyorum', icon: Broom, ...PALETTE.teal, world: 5, country: 2, peaks: [{ hour: 11, spread: 4 }] },
-  { id: 'friends', name: 'Arkadaşlarımla birlikteyim', icon: UsersThree, ...PALETTE.rose, world: 4.5, country: 2, peaks: [{ hour: 20, spread: 4 }] },
+  { id: 'friends', name: 'Arkadaşlarımlayım', icon: UsersThree, ...PALETTE.rose, world: 4.5, country: 2, peaks: [{ hour: 20, spread: 4 }] },
   { id: 'scrolling', name: 'Telefonda geziniyorum', icon: DeviceMobile, ...PALETTE.rose, world: 10, country: 8, peaks: [{ hour: 22, spread: 3 }] },
   { id: 'resting', name: 'Dinleniyorum', icon: Leaf, ...PALETTE.teal, world: 8, country: 6, peaks: [{ hour: 14, spread: 5 }] },
-  { id: 'walk', name: 'Yürüyüş yapıyorum', icon: PersonSimpleWalk, ...PALETTE.teal, world: 3, country: 3, peaks: [{ hour: 8, spread: 2 }, { hour: 19, spread: 2.5 }] },
+  { id: 'walk', name: 'Yürüyüşteyim', icon: PersonSimpleWalk, ...PALETTE.teal, world: 3, country: 3, peaks: [{ hour: 8, spread: 2 }, { hour: 19, spread: 2.5 }] },
   { id: 'vacation', name: 'Tatildeyim', icon: Airplane, ...PALETTE.amber, world: 2, country: 2, peaks: [{ hour: 13, spread: 6 }] },
+  // 1.5.5: yeni aktiviteler (sunucuda presence_activity_id_check kısıtına eklendi)
+  { id: 'kids', name: 'Çocukla ilgileniyorum', icon: Baby, ...PALETTE.rose, world: 3, country: 3, peaks: [{ hour: 10, spread: 3 }, { hour: 17, spread: 3 }] },
+  { id: 'break', name: 'Moladayım', icon: PauseCircle, ...PALETTE.indigo, world: 3, country: 3, peaks: [{ hour: 10.5, spread: 1 }, { hour: 15.5, spread: 1 }] },
+  { id: 'store', name: 'Dükkandayım', icon: Storefront, ...PALETTE.amber, world: 2, country: 2, peaks: [{ hour: 14, spread: 5 }] },
+  { id: 'shift', name: 'Vardiyadayım / nöbetteyim', icon: ClockClockwise, ...PALETTE.indigo, world: 2, country: 2, peaks: [{ hour: 23, spread: 6 }] },
   { id: 'happy', name: 'Neşeliyim', icon: Smiley, ...PALETTE.indigo, world: 8, country: 7, peaks: [{ hour: 20, spread: 5 }], mood: true },
   { id: 'calm', name: 'Huzurluyum', icon: FlowerLotus, ...PALETTE.indigo, world: 6, country: 5, peaks: [{ hour: 10, spread: 5 }], mood: true },
   { id: 'hurt', name: 'Kırgınım', icon: HeartBreak, ...PALETTE.indigo, world: 4, country: 4, peaks: [{ hour: 22, spread: 4 }], mood: true },
@@ -396,6 +405,17 @@ const ACTIVITIES: Activity[] = [
 ];
 
 const ACTIVITIES_BY_ID: Record<string, Activity> = Object.fromEntries(ACTIVITIES.map((a) => [a.id, a]));
+
+// 1.5.5: ana ekranda aktiviteler sabit gruplarda, grup içinde sabit sırada durur (yerleri ezberlenebilsin)
+const ACTIVITY_GROUPS: { id: string; tr: string; en: string; ids: string[] }[] = [
+  { id: 'home', tr: 'Evde', en: 'At home', ids: ['lying', 'resting', 'eat', 'cook', 'chores', 'kids'] },
+  { id: 'fun', tr: 'Keyif ve ekran', en: 'Fun and screens', ids: ['scrolling', 'gaming', 'tv', 'coffee'] },
+  { id: 'work', tr: 'İş ve okul', en: 'Work and school', ids: ['study', 'work', 'break', 'store', 'shift'] },
+  { id: 'out', tr: 'Yolda ve dışarıda', en: 'Out and about', ids: ['travel', 'friends', 'shop', 'sport', 'walk', 'vacation'] },
+];
+const NEW_ACTIVITY_IDS = ['kids', 'break', 'store', 'shift'];
+const NEW_TAG_KEY = 'new_acts_seen_v155'; // "yeni" etiketi ilk görüldükten sonra 7 gün durur
+const NEW_TAG_MS = 7 * 24 * 60 * 60 * 1000;
 
 const FILTERS = [
   { id: 'world', label: 'Herkes' },
@@ -549,8 +569,31 @@ function baselineScores(date: Date): Record<string, number> {
 }
 
 // Ana aktiviteleri sırala: canlı veri varsa tahminle yarı yarıya karıştır
-function rankMainActivities(date: Date, liveRows: DashboardRow[] | null): Activity[] {
+// Kullanıcının bu saatlerde (±2 saat, son 30 gün) en çok seçtikleri: 0-1 arası puan.
+// En az 2 kez seçilmiş olmalı; tek seferlik seçim sıralamayı oynatmasın.
+function personalScores(date: Date, history: MomentEntry[]): Record<string, number> {
+  const hour = date.getHours() + date.getMinutes() / 60;
+  const since = date.getTime() - 30 * 24 * 60 * 60 * 1000;
+  const cnt: Record<string, number> = {};
+  for (const h of history) {
+    if (h.at < since) continue;
+    const a = ACTIVITIES_BY_ID[h.id];
+    if (!a || a.mood) continue;
+    const d = new Date(h.at);
+    if (circularDist(hour, d.getHours() + d.getMinutes() / 60) > 2) continue;
+    cnt[h.id] = (cnt[h.id] ?? 0) + 1;
+  }
+  const max = Math.max(0, ...Object.values(cnt));
+  const out: Record<string, number> = {};
+  if (max < 2) return out;
+  for (const id of Object.keys(cnt)) if (cnt[id] >= 2) out[id] = cnt[id] / max;
+  return out;
+}
+const PERSONAL_WEIGHT = 0.6;
+
+function rankMainActivities(date: Date, liveRows: DashboardRow[] | null, history: MomentEntry[] = []): Activity[] {
   const base = baselineScores(date);
+  const mine = personalScores(date, history);
   let live: Record<string, number> | null = null;
   if (liveRows && liveRows.length > 0) {
     const maxCnt = Math.max(...liveRows.map((r) => r.cnt));
@@ -561,8 +604,9 @@ function rankMainActivities(date: Date, liveRows: DashboardRow[] | null): Activi
   }
   const score = (a: Activity) => {
     const b = base[a.id] ?? 0;
-    if (!live) return b;
-    return (1 - LIVE_WEIGHT) * b + LIVE_WEIGHT * (live[a.id] ?? 0);
+    const p = PERSONAL_WEIGHT * (mine[a.id] ?? 0);
+    if (!live) return b + p;
+    return (1 - LIVE_WEIGHT) * b + LIVE_WEIGHT * (live[a.id] ?? 0) + p;
   };
   return ACTIVITIES.filter((a) => !a.mood).sort((a, b) => score(b) - score(a));
 }
@@ -2300,6 +2344,19 @@ export default function HomeScreen() {
   const [othersMin, setOthersMin] = useState<number>(OTHERS_MIN);
   const [pendingShare, setPendingShare] = useState(false);
   const [history, setHistory] = useState<MomentEntry[]>([]);
+  // 1.5.5: yeni aktivitelerdeki "yeni" etiketi, ilk görüldükten sonra 7 gün
+  const [newTag, setNewTag] = useState(false);
+  useEffect(() => {
+    AsyncStorage.getItem(NEW_TAG_KEY)
+      .then((v) => {
+        const t = v ? Number(v) : 0;
+        if (!t) {
+          AsyncStorage.setItem(NEW_TAG_KEY, String(Date.now())).catch(() => {});
+          setNewTag(true);
+        } else setNewTag(Date.now() - t < NEW_TAG_MS);
+      })
+      .catch(() => {});
+  }, []);
   const [endNotify, setEndNotify] = useState(false);
   // 1.2: alt menü sekmesi ve "Ben" bilgileri (sadece telefonda)
   const [tab, setTab] = useState<TabId>('now');
@@ -2801,10 +2858,10 @@ export default function HomeScreen() {
   }, [tab, selected, dashboardOpen]);
 
   const sortedActivities = useMemo(() => {
-    const main = rankMainActivities(new Date(now), liveRows);
+    const main = rankMainActivities(new Date(now), liveRows, history);
     const mood = ACTIVITIES.filter((a) => a.mood);
     return [...main, ...mood];
-  }, [now, liveRows]);
+  }, [now, liveRows, history]);
 
   async function toggleEndNotify(next: boolean) {
     tap(true);
@@ -3456,7 +3513,7 @@ export default function HomeScreen() {
               <View style={ws.momentPill}>
                 <Ionicons name="time-outline" size={15} color={fg} />
                 <Text style={ws.momentPillText}>
-                  {lang === 'tr' ? 'Bugünün Anı: ' : "Today's Moment: "}
+                  {lang === 'tr' ? 'Günün Anı: ' : "Today's Moment: "}
                   <Text style={[ws.momentPillStrong, { color: fg }]}>{hhmm(nextMoment)}</Text>
                 </Text>
               </View>
@@ -3559,7 +3616,7 @@ export default function HomeScreen() {
           <View style={styles.timerBox}>
             <View style={styles.timerLabels}>
               <Text style={styles.timerText}>
-                {lang === 'tr' ? `Yeni an ${Math.max(1, remainingMin)} dk sonra` : `New moment in ${Math.max(1, remainingMin)} min`}
+                {lang === 'tr' ? `${Math.max(1, remainingMin)} dk sonra tekrar seçebilirsin` : `Pick again in ${Math.max(1, remainingMin)} min`}
               </Text>
               <Text style={styles.timerText}>{lang === 'tr' ? '30 dk' : '30 min'}</Text>
             </View>
@@ -3693,7 +3750,6 @@ export default function HomeScreen() {
   const showDashboardEntry = activeCount !== null && activeCount >= DASHBOARD_THRESHOLD;
   const mainActivities = sortedActivities.filter((a) => !a.mood);
   const topThree = mainActivities.slice(0, 3);
-  const others = mainActivities.slice(3);
   const moods = sortedActivities.filter((a) => a.mood);
   const showHeroCount = activeCount !== null && activeCount >= HERO_COUNT_THRESHOLD;
   const part = dayPart(lang);
@@ -3985,7 +4041,10 @@ export default function HomeScreen() {
               </Pressable>
             ) : null}
 
-            <Text style={[styles.sectionTitle, lockVisible && { marginTop: SP.md }]}>{tx.sectionTop}</Text>
+            <View style={[styles.sectionHead, lockVisible && { marginTop: SP.md }]}>
+              <Text style={styles.sectionHeadTitle}>{tx.sectionTop}</Text>
+              <Text style={styles.sectionHeadSub}>{tx.sectionTopSub}</Text>
+            </View>
             <View style={styles.topRow3}>
               {topThree.map((a, i) => (
                 <StaggerIn key={a.id} delay={i * 30} style={styles.topCardWrap}>
@@ -3994,7 +4053,7 @@ export default function HomeScreen() {
                     style={[styles.topCard, { backgroundColor: a.bg }]}
                     onPress={() => selectActivity(a)}
                   >
-                    <ActivityIcon activity={a} size={36} iconSize={20} bg="#ffffff" />
+                    <ActivityIcon activity={a} size={32} iconSize={18} bg="#ffffff" />
                     <Text style={styles.topCardName} numberOfLines={2}>
                       {activityName(a.id, lang)}
                     </Text>
@@ -4003,21 +4062,36 @@ export default function HomeScreen() {
               ))}
             </View>
 
-            <Text style={styles.sectionTitle}>{tx.sectionOthers}</Text>
-            <View style={styles.grid}>
-              {others.map((a, i) => (
-                <StaggerIn key={a.id} delay={90 + i * 18} style={styles.cardWrap}>
-                  <PressableScale wrapStyle={styles.cardPress} style={styles.card} onPress={() => selectActivity(a)}>
-                    <ActivityIcon activity={a} size={36} iconSize={20} />
-                    <Text style={styles.name} numberOfLines={2}>
-                      {activityName(a.id, lang)}
-                    </Text>
-                  </PressableScale>
-                </StaggerIn>
-              ))}
-            </View>
+            {ACTIVITY_GROUPS.map((g, gi) => (
+              <View key={g.id}>
+                <Text style={styles.groupTitle}>{(lang === 'tr' ? g.tr : g.en).toLocaleUpperCase(lang === 'tr' ? 'tr-TR' : 'en-US')}</Text>
+                <View style={styles.grid}>
+                  {g.ids.map((id, i) => {
+                    const a = ACTIVITIES_BY_ID[id];
+                    if (!a) return null;
+                    // Tek kalan son kart satırı tam kaplar (uzun ad da sığar)
+                    const wide = i === g.ids.length - 1 && i % 2 === 0;
+                    return (
+                      <StaggerIn key={a.id} delay={90 + gi * 40 + i * 12} style={wide ? styles.cardWrapWide : styles.cardWrap}>
+                        <PressableScale wrapStyle={styles.cardPress} style={styles.card} onPress={() => selectActivity(a)}>
+                          <ActivityIcon activity={a} size={32} iconSize={18} />
+                          <Text style={styles.name} numberOfLines={2}>
+                            {activityName(a.id, lang)}
+                          </Text>
+                        </PressableScale>
+                        {newTag && NEW_ACTIVITY_IDS.includes(a.id) ? (
+                          <View style={styles.newTag} pointerEvents="none">
+                            <Text style={styles.newTagText}>{lang === 'tr' ? 'yeni' : 'new'}</Text>
+                          </View>
+                        ) : null}
+                      </StaggerIn>
+                    );
+                  })}
+                </View>
+              </View>
+            ))}
 
-            <Text style={styles.sectionTitle}>{tx.sectionMood}</Text>
+            <Text style={[styles.groupTitle, { marginBottom: SP.sm + 2 }]}>{tx.sectionMood.toLocaleUpperCase(lang === 'tr' ? 'tr-TR' : 'en-US')}</Text>
             <View style={styles.moodRow}>
               {moods.map((a) => {
                 const Icon = a.icon;
@@ -4143,12 +4217,19 @@ const styles = StyleSheet.create({
     marginTop: SP.xl,
     marginBottom: SP.md,
   },
-  topRow3: { flexDirection: 'row', gap: SP.sm + 2 },
+  sectionHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: SP.lg, marginBottom: SP.sm + 2 },
+  sectionHeadTitle: { fontFamily: F.bold, fontSize: FS.md, color: '#2A2A33' },
+  sectionHeadSub: { fontFamily: F.medium, fontSize: FS.xs, color: FAINT },
+  groupTitle: { fontFamily: F.bold, fontSize: 11.5, letterSpacing: 0.8, color: '#6B7085', marginTop: SP.lg, marginBottom: SP.sm, marginLeft: 2 },
+  cardWrapWide: { width: '100%' },
+  newTag: { position: 'absolute', top: -6, right: 8, backgroundColor: '#F4B88A', borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1.5 },
+  newTagText: { fontFamily: F.bold, fontSize: 9, color: LOGO_NAVY },
+  topRow3: { flexDirection: 'row', gap: SP.sm },
   topCardWrap: { flex: 1 },
   topCard: {
-    minHeight: 92,
+    minHeight: 80,
     borderRadius: SP.lg,
-    paddingVertical: SP.md,
+    paddingVertical: SP.sm + 2,
     paddingHorizontal: SP.sm,
     alignItems: 'center',
     justifyContent: 'center',
@@ -4161,18 +4242,18 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginTop: SP.xs + 2,
   },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm + 2 },
-  cardWrap: { width: '48.3%' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: SP.sm },
+  cardWrap: { width: '48.8%' },
   cardPress: { width: '100%' },
   card: {
     backgroundColor: '#ffffff',
-    minHeight: 64,
-    borderRadius: SP.lg + 2,
-    paddingVertical: SP.md,
-    paddingHorizontal: SP.md,
+    minHeight: 50,
+    borderRadius: SP.lg,
+    paddingVertical: SP.sm,
+    paddingHorizontal: SP.sm + 2,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SP.sm + 2,
+    gap: SP.sm + 1,
     ...SOFT_SHADOW,
   },
   name: {

@@ -220,7 +220,8 @@ export function badgeName(id: BadgeId, lang: Lang): string {
 
 // ---------------------------------------------------------------- 30 günlük yol
 export type DayStatus = 'answered' | 'joker' | 'archived' | 'missed' | 'today' | 'locked';
-export type PathDay = { n: number; date: string; status: DayStatus };
+// pre: kullanıcı o gün henüz uygulamada yoktu (kaçırılmış sayılmaz, yolda üstü çizili görünmez)
+export type PathDay = { n: number; date: string; status: DayStatus; pre?: boolean };
 
 export type Progress = {
   days: PathDay[];
@@ -291,7 +292,7 @@ export function computePath(
     if (!firstAnswered) {
       // Kullanıcı henüz başlamamıştı: can harcanmaz, seri zaten 0
       founding = false;
-      days.push({ n: i, date, status: missedStatus });
+      days.push({ n: i, date, status: missedStatus, pre: true });
       continue;
     }
     if (!jokerUsed[week]) {

@@ -138,6 +138,30 @@ export const STORY_TEXTS: Record<string, StoryText> = {
     tr: { ben: "Şu an tatildeyim.", q: "kimler tatilde?", team: "Tatil ekibi", s: ["Bugün herkes tatilde, mesai kimde?", "Tatilde yalnız değilim.", "Herkes işte, ben tatildeyim.", "Tatilde başka kim var?"] },
     en: { ben: "Right now I'm on vacation.", q: "Who's on vacation", team: "Team Vacation", s: ["Everyone's on vacation. Who's working?", "Not alone on vacation.", "Everyone's working, I'm on vacation.", "Who else is on vacation?"] },
   },
+  kids: {
+    emoji: "🧸",
+    color: 'pink',
+    tr: { ben: "Şu an çocukla ilgileniyorum.", q: "kimler çocukla ilgileniyor?", team: "Ebeveyn ekibi", s: ["Bugün herkes çocuk peşinde.", "Çocuk peşinde yalnız değilim.", "Herkes kendi işinde, ben çocuk peşindeyim.", "Çocukla ilgilenen başka kim var?"] },
+    en: { ben: "Right now I'm looking after kids.", q: "Who's looking after kids", team: "Team Parents", s: ["Everyone's chasing kids today.", "Not the only one on kid duty.", "Everyone's busy, I'm on kid duty.", "Anyone else on kid duty?"] },
+  },
+  break: {
+    emoji: "⏸️",
+    color: 'indigo',
+    tr: { ben: "Şu an moladayım.", q: "kimler molada?", team: "Çay molası ekibi", s: ["Bugün herkes molada.", "Molada yalnız değilim.", "Herkes çalışıyor, ben moladayım.", "Molada başka kim var?"] },
+    en: { ben: "Right now I'm on a break.", q: "Who's on a break", team: "Team Break", s: ["Everyone's on a break today.", "Not alone on my break.", "Everyone's working, I'm on a break.", "Who else is on a break?"] },
+  },
+  store: {
+    emoji: "🏪",
+    color: 'coffee',
+    tr: { ben: "Şu an dükkandayım.", q: "kimler dükkanda?", team: "Esnaf ekibi", s: ["Bugün dükkanlar dolu.", "Dükkanda yalnız değilim.", "Bu saatte dükkanı açık tutan az.", "Dükkanda başka kim var?"] },
+    en: { ben: "Right now I'm at the shop.", q: "Who's minding the shop", team: "Team Shopkeepers", s: ["Shops are busy today.", "Not the only one at the shop.", "Few keep the shop open at this hour.", "Who else is at the shop?"] },
+  },
+  shift: {
+    emoji: "🕐",
+    color: 'navy',
+    tr: { ben: "Şu an vardiyadayım.", q: "kimler vardiyada?", team: "Vardiya ekibi", s: ["Bugün vardiya kalabalık.", "Vardiyada yalnız değilim.", "Herkes uyurken ben nöbetteyim.", "Vardiyada başka kim var?"] },
+    en: { ben: "Right now I'm on shift.", q: "Who's on shift", team: "Team Shift", s: ["Busy shift today.", "Not alone on shift.", "On shift while everyone sleeps.", "Who else is on shift?"] },
+  },
   happy: {
     emoji: "😄",
     color: 'sunset',

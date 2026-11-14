@@ -4220,7 +4220,7 @@ const styles = StyleSheet.create({
   sectionHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: SP.lg, marginBottom: SP.sm + 2 },
   sectionHeadTitle: { fontFamily: F.bold, fontSize: FS.md, color: '#2A2A33' },
   sectionHeadSub: { fontFamily: F.medium, fontSize: FS.xs, color: FAINT },
-  groupTitle: { fontFamily: F.bold, fontSize: 11.5, letterSpacing: 0.8, color: '#6B7085', marginTop: SP.lg, marginBottom: SP.sm, marginLeft: 2 },
+  groupTitle: { fontFamily: F.bold, fontSize: 11.5, letterSpacing: 0.8, color: '#2F3447', marginTop: SP.lg, marginBottom: SP.sm, marginLeft: 2 },
   cardWrapWide: { width: '100%' },
   newTag: { position: 'absolute', top: -6, right: 8, backgroundColor: '#F4B88A', borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1.5 },
   newTagText: { fontFamily: F.bold, fontSize: 9, color: LOGO_NAVY },

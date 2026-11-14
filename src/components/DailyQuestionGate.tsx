@@ -85,9 +85,11 @@ const TEXT = {
   tr: {
     intro: 'Başlamadan önce kısa bir soru',
     label: 'GÜNÜN SORUSU',
-    day: (n: number) => `${n}. günün`,
+    day: (n: number) => (n === 1 ? 'İlk günün' : `${n}. günün`),
     hint: "Herkese aynı soru. Sonuç akşam 21:00'de.",
-    predictLabel: 'TAHMİN ET 🎯',
+    predictIntro: 'Cevabın alındı ✓ Şimdi bonus tur',
+    predictAbout: 'Soru',
+    predictLabel: 'BONUS · TAHMİN ET 🎯',
     predictQ: "Sence Şu An'daki çoğunluk ne dedi?",
     predictHint: (p: number) => `Bilirsen +${p} puan. Sonuç 21:00'de.`,
     yourAnswer: 'Senin cevabın',
@@ -108,9 +110,11 @@ const TEXT = {
   en: {
     intro: 'A quick question before you start',
     label: 'QUESTION OF THE DAY',
-    day: (n: number) => `Your day ${n}`,
+    day: (n: number) => (n === 1 ? 'Your first day' : `Your day ${n}`),
     hint: 'Same question for everyone. Results at 9 pm.',
-    predictLabel: 'MAKE A GUESS 🎯',
+    predictIntro: 'Answer saved ✓ Now a bonus round',
+    predictAbout: 'Question',
+    predictLabel: 'BONUS · MAKE A GUESS 🎯',
     predictQ: 'What do you think most people said?',
     predictHint: (p: number) => `Guess right for +${p} points. Results at 9 pm.`,
     yourAnswer: 'Your answer',
@@ -402,13 +406,14 @@ export function DailyQuestionGate() {
           <Pressable style={StyleSheet.absoluteFill} onPress={onBackdrop} accessibilityLabel={tx.skip} />
         </Animated.View>
 
-        <Animated.View style={[styles.card, { transform: [{ translateY: slide }] }]}>
+        <Animated.View style={[styles.card, predicting && styles.cardPredict, { transform: [{ translateY: slide }] }]}>
           <View style={styles.topRow}>
-            <View style={styles.introIcon}>
-              <ChatCircleDots size={23} color={AMBER_FG} weight="duotone" />
+            {/* 1.5.5: tahmin adımı sorunun tekrarı sanılmasın: üst satır, renk ve başlık değişir */}
+            <View style={[styles.introIcon, predicting && styles.introIconPredict]}>
+              {predicting ? <Text style={{ fontSize: 20 }}>🎯</Text> : <ChatCircleDots size={23} color={AMBER_FG} weight="duotone" />}
             </View>
-            <Text style={styles.intro}>{tx.intro}</Text>
-            {personalDay > 0 ? (
+            <Text style={styles.intro}>{predicting ? tx.predictIntro : tx.intro}</Text>
+            {personalDay > 0 && !predicting ? (
               <View style={styles.dayPill}>
                 <Text style={styles.dayPillText}>{tx.day(personalDay)}</Text>
               </View>
@@ -420,7 +425,10 @@ export function DailyQuestionGate() {
               <View style={[styles.labelPill, styles.predictPill]}>
                 <Text style={[styles.label, styles.predictLabel]}>{tx.predictLabel}</Text>
               </View>
-              <Text style={styles.question}>{tx.predictQ}</Text>
+              <Text style={styles.predictAbout} numberOfLines={2}>
+                {tx.predictAbout}: {qText}
+              </Text>
+              <Text style={[styles.question, styles.questionPredict]}>{tx.predictQ}</Text>
               <Text style={styles.hint}>{tx.predictHint(POINTS_HIT)}</Text>
               {answerOption ? (
                 <View style={styles.answerChip}>
@@ -688,6 +696,10 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   predictPill: { backgroundColor: '#EEEDFB' },
+  cardPredict: { borderTopWidth: 5, borderTopColor: '#4F46E5' },
+  introIconPredict: { backgroundColor: '#EEEDFB' },
+  predictAbout: { fontFamily: F.medium, fontSize: 14, color: '#6B7085' },
+  questionPredict: { fontSize: 26, lineHeight: 32, color: '#2F2BA8' },
   predictLabel: { color: '#3F3BC9' },
   answerChip: {
     paddingHorizontal: 12,

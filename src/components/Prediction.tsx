@@ -103,7 +103,7 @@ export function PredictionChip({ lang, style, streak }: { lang: Lang; style?: ob
           accessibilityLabel={tr(lang) ? `${data.allTotal} puan` : `${data.allTotal} points`}
         >
           <Text style={styles.chipText} numberOfLines={1}>
-            🎯 {data.allTotal.toLocaleString(tr(lang) ? 'tr-TR' : 'en-US')}
+            🎯 {data.allTotal.toLocaleString(tr(lang) ? 'tr-TR' : 'en-US')} {tr(lang) ? 'puan' : data.allTotal === 1 ? 'point' : 'points'}
           </Text>
         </Pressable>
       </Animated.View>
@@ -285,7 +285,19 @@ export function PredictionSheet({
       <View style={styles.backdrop}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={T ? 'Kapat' : 'Close'} />
         <View style={[styles.sheet, { paddingBottom: insets.bottom + 12, maxHeight: '92%' }]}>
-          <View style={styles.grab} />
+          {/* 1.5.5: tutamaç yerine başlık + çarpı (panel neredeyse tam ekran, kapatmak zordu) */}
+          <View style={styles.sheetBar}>
+            <Text style={styles.sheetBarTitle}>{T ? 'Puanlarım' : 'My points'}</Text>
+            <Pressable
+              onPress={onClose}
+              hitSlop={12}
+              style={({ pressed }) => [styles.sheetClose, pressed && { opacity: 0.6 }]}
+              accessibilityRole="button"
+              accessibilityLabel={T ? 'Kapat' : 'Close'}
+            >
+              <Ionicons name="close" size={20} color={INK} />
+            </Pressable>
+          </View>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
             {/* Üst kart */}
             <View
@@ -1004,6 +1016,9 @@ const styles = StyleSheet.create({
   chipText: { fontFamily: F.bold, fontSize: 13.5, color: '#ffffff' },
   backdrop: { flex: 1, backgroundColor: 'rgba(10,14,30,0.45)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 10 },
+  sheetBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4, marginBottom: 12 },
+  sheetBarTitle: { fontFamily: F.bold, fontSize: 18, color: INK },
+  sheetClose: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F0F1F5', alignItems: 'center', justifyContent: 'center' },
   grab: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: '#DADCE3', marginBottom: 14 },
   sheetTitle: { fontFamily: F.bold, fontSize: 21, color: INK },
   sheetSub: { fontFamily: F.regular, fontSize: 13.5, color: MUTED, marginTop: 4 },

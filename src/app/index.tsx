@@ -383,7 +383,7 @@ const ACTIVITIES: Activity[] = [
   { id: 'gaming', name: 'Oyun oynuyorum', icon: GameController, ...PALETTE.rose, world: 9, country: 6, peaks: [{ hour: 22, spread: 4 }] },
   { id: 'shop', name: 'Alışverişteyim', icon: ShoppingCart, ...PALETTE.amber, world: 3.5, country: 3, peaks: [{ hour: 15, spread: 4 }] },
   { id: 'chores', name: 'Ev işi yapıyorum', icon: Broom, ...PALETTE.teal, world: 5, country: 2, peaks: [{ hour: 11, spread: 4 }] },
-  { id: 'friends', name: 'Arkadaşlarımlayım', icon: UsersThree, ...PALETTE.rose, world: 4.5, country: 2, peaks: [{ hour: 20, spread: 4 }] },
+  { id: 'friends', name: 'Arkadaşlarlayım', icon: UsersThree, ...PALETTE.rose, world: 4.5, country: 2, peaks: [{ hour: 20, spread: 4 }] },
   { id: 'scrolling', name: 'Telefonda geziniyorum', icon: DeviceMobile, ...PALETTE.rose, world: 10, country: 8, peaks: [{ hour: 22, spread: 3 }] },
   { id: 'resting', name: 'Dinleniyorum', icon: Leaf, ...PALETTE.teal, world: 8, country: 6, peaks: [{ hour: 14, spread: 5 }] },
   { id: 'walk', name: 'Yürüyüşteyim', icon: PersonSimpleWalk, ...PALETTE.teal, world: 3, country: 3, peaks: [{ hour: 8, spread: 2 }, { hour: 19, spread: 2.5 }] },
@@ -4054,7 +4054,12 @@ export default function HomeScreen() {
                     onPress={() => selectActivity(a)}
                   >
                     <ActivityIcon activity={a} size={32} iconSize={18} bg="#ffffff" />
-                    <Text style={styles.topCardName} numberOfLines={2}>
+                    <Text
+                      style={styles.topCardName}
+                      numberOfLines={activityName(a.id, lang).includes(' ') ? 2 : 1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.7}
+                    >
                       {activityName(a.id, lang)}
                     </Text>
                   </PressableScale>
@@ -4075,7 +4080,12 @@ export default function HomeScreen() {
                       <StaggerIn key={a.id} delay={90 + gi * 40 + i * 12} style={wide ? styles.cardWrapWide : styles.cardWrap}>
                         <PressableScale wrapStyle={styles.cardPress} style={styles.card} onPress={() => selectActivity(a)}>
                           <ActivityIcon activity={a} size={32} iconSize={18} />
-                          <Text style={styles.name} numberOfLines={2}>
+                          <Text
+                            style={styles.name}
+                            numberOfLines={activityName(a.id, lang).includes(' ') ? 2 : 1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.8}
+                          >
                             {activityName(a.id, lang)}
                           </Text>
                         </PressableScale>

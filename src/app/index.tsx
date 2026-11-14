@@ -611,6 +611,12 @@ function rankMainActivities(date: Date, liveRows: DashboardRow[] | null, history
   return ACTIVITIES.filter((a) => !a.mood).sort((a, b) => score(b) - score(a));
 }
 
+// 1.5.5 (31): boşluksuz ve 14 harften uzun ad ("Arkadaşlarlayım") dar kartta bölünmesin diye küçük punto alır.
+// adjustsFontSizeToFit kullanılmıyor: iOS'ta ara sıra yazıyı okunmayacak kadar küçültüyordu.
+function isLongWord(name: string) {
+  return !name.includes(' ') && name.length > 13;
+}
+
 function circularDist(a: number, b: number) {
   const d = Math.abs(a - b) % 24;
   return d > 12 ? 24 - d : d;
@@ -4055,10 +4061,8 @@ export default function HomeScreen() {
                   >
                     <ActivityIcon activity={a} size={32} iconSize={18} bg="#ffffff" />
                     <Text
-                      style={styles.topCardName}
-                      numberOfLines={activityName(a.id, lang).includes(' ') ? 2 : 1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.7}
+                      style={[styles.topCardName, isLongWord(activityName(a.id, lang)) && styles.topCardNameSmall]}
+                      numberOfLines={2}
                     >
                       {activityName(a.id, lang)}
                     </Text>
@@ -4080,12 +4084,7 @@ export default function HomeScreen() {
                       <StaggerIn key={a.id} delay={90 + gi * 40 + i * 12} style={wide ? styles.cardWrapWide : styles.cardWrap}>
                         <PressableScale wrapStyle={styles.cardPress} style={styles.card} onPress={() => selectActivity(a)}>
                           <ActivityIcon activity={a} size={32} iconSize={18} />
-                          <Text
-                            style={styles.name}
-                            numberOfLines={activityName(a.id, lang).includes(' ') ? 2 : 1}
-                            adjustsFontSizeToFit
-                            minimumFontScale={0.8}
-                          >
+                          <Text style={styles.name} numberOfLines={2}>
                             {activityName(a.id, lang)}
                           </Text>
                         </PressableScale>
@@ -4244,6 +4243,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  topCardNameSmall: { fontSize: 11.5, letterSpacing: -0.2 },
   topCardName: {
     fontFamily: F.bold,
     fontSize: FS.sm,

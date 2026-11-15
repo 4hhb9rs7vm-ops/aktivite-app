@@ -552,23 +552,6 @@ export function MeTab({
               ios_backgroundColor="#D5D7DE"
             />
           </View>
-          <View style={styles.row}>
-            <Ionicons name="alarm-outline" size={20} color={SOFT} />
-            <View style={{ flex: 1, gap: 2 }}>
-              <Text style={styles.notifLabel}>{t.reminder}</Text>
-              <Text style={styles.toggleSub}>{t.reminderSub}</Text>
-            </View>
-            <Switch
-              value={reminderOn}
-              onValueChange={(v) => {
-                tap(true);
-                onReminderChange(v);
-              }}
-              trackColor={{ true: ACCENT, false: '#D5D7DE' }}
-              thumbColor="#FFFFFF"
-              ios_backgroundColor="#D5D7DE"
-            />
-          </View>
         </View>
         <Text style={styles.quietNote}>{t.quiet}</Text>
 

@@ -128,6 +128,8 @@ import { SelamCard } from '@/components/SelamCard';
 import { checkBadges } from '@/lib/badges';
 import { fetchLatestSelamSummary, onSelamChanged, SelamSummary } from '@/lib/selam';
 import { answerAsks, onOpenTab, registerPushToken } from '@/lib/ask';
+import { notifAskedRecently } from '@/lib/notifAsk';
+import { onResultSeen } from '@/lib/overlay';
 import { isOverlayBusy, setOverlayBusy, whenOverlayFree } from '@/lib/overlay';
 import {
   deleteFriendData,
@@ -229,61 +231,21 @@ function nearDailyMoment(at: Date) {
   return Math.abs(at.getTime() - m) < MOMENT_CLASH_MS;
 }
 
-async function scheduleMomentEndNotification(startedAt: number, lang: Lang) {
+// 1.5.6: "yeni an" hatırlatması kaldırıldı (hatırlatma türü bildirimler işe yaramıyor, rahatsız ediyor).
+// Eski sürümde kurulmuş bir hatırlatma varsa iptal edilir; yenisi kurulmaz.
+async function scheduleMomentEndNotification(_startedAt: number, _lang: Lang) {
   await cancelMomentEndNotification();
-  const fireAt = startedAt + REMIND_AFTER_MS;
-  const seconds = Math.round((fireAt - Date.now()) / 1000);
-  if (seconds < 5) return;
-  const at = new Date(fireAt);
-  if (inQuietHours(at) || nearDailyMoment(at)) return;
-  const day = `${at.getFullYear()}-${at.getMonth() + 1}-${at.getDate()}`;
-  let used = 0;
-  try {
-    const raw = await AsyncStorage.getItem(END_NOTIF_COUNT_KEY);
-    const saved = raw ? JSON.parse(raw) : null;
-    if (saved && saved.day === day) used = saved.count || 0;
-  } catch {}
-  if (used >= END_NOTIF_DAILY_MAX) return;
-  try {
-    const Notifications = getNotifications();
-    if (!Notifications) return;
-    const tr = lang === 'tr';
-    const id = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: tr ? 'Yeni bir an için hazır mısın?' : 'Ready for a new moment?',
-        body: tr
-          ? 'Şu an ne yapıyorsun? Bir an seç, seninle aynı olanları gör.'
-          : "What are you doing now? Pick a moment and see who's with you.",
-      },
-      trigger: { type: 'timeInterval', seconds, repeats: false } as any,
-    });
-    await AsyncStorage.setItem(END_NOTIF_ID_KEY, id);
-    await AsyncStorage.setItem(END_NOTIF_COUNT_KEY, JSON.stringify({ day, count: used + 1 }));
-  } catch {}
 }
 
 // Kilitliyken "haber ver" denirse: kilit bitince tek seferlik bildirim
-async function scheduleLockEndNotification(endsAt: number, lang: Lang): Promise<boolean> {
+// 1.5.6: kaldırıldı. Eski sürümde kurulmuş bildirim varsa iptal edilir.
+async function cancelLockEndNotification(): Promise<void> {
   try {
     const Notifications = getNotifications();
-    if (!Notifications) return false;
     const old = await AsyncStorage.getItem(LOCK_NOTIF_ID_KEY);
-    if (old) await Notifications.cancelScheduledNotificationAsync(old).catch(() => {});
-    const seconds = Math.round((endsAt - Date.now()) / 1000);
-    if (seconds < 5) return false;
-    const tr = lang === 'tr';
-    const id = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: tr ? 'Yeni anın hazır' : 'Your next moment is ready',
-        body: tr ? 'Artık yeni bir an seçebilirsin. Şu an ne yapıyorsun?' : 'You can pick a new moment now. What are you up to?',
-      },
-      trigger: { type: 'timeInterval', seconds, repeats: false } as any,
-    });
-    await AsyncStorage.setItem(LOCK_NOTIF_ID_KEY, id);
-    return true;
-  } catch {
-    return false;
-  }
+    if (old && Notifications) await Notifications.cancelScheduledNotificationAsync(old).catch(() => {});
+    if (old) await AsyncStorage.removeItem(LOCK_NOTIF_ID_KEY);
+  } catch {}
 }
 const HISTORY_MAX = 600;
 type MomentEntry = { id: string; at: number; guess: number | null; pct: number | null };
@@ -529,6 +491,7 @@ async function shouldAskNotifications(): Promise<boolean> {
   if (Platform.OS === 'web') return false;
   try {
     if ((await AsyncStorage.getItem(NOTIF_ASKED_KEY)) === 'yes') return false;
+    if (await notifAskedRecently()) return false; // 1.5.6: soru kartında az önce soruldu
     if (await hasNotificationPermission()) {
       await AsyncStorage.setItem(NOTIF_ASKED_KEY, 'yes');
       scheduleDailyMoments().catch(() => {});
@@ -614,7 +577,7 @@ function rankMainActivities(date: Date, liveRows: DashboardRow[] | null, history
 // 1.5.5 (31): boşluksuz ve 14 harften uzun ad ("Arkadaşlarlayım") dar kartta bölünmesin diye küçük punto alır.
 // adjustsFontSizeToFit kullanılmıyor: iOS'ta ara sıra yazıyı okunmayacak kadar küçültüyordu.
 function isLongWord(name: string) {
-  return !name.includes(' ') && name.length > 13;
+  return !name.includes(' ') && name.length > 14; // "Alışverişteyim" (14) normal puntoda sığıyor
 }
 
 function circularDist(a: number, b: number) {
@@ -2030,6 +1993,19 @@ const gs = StyleSheet.create({
 });
 
 const hs = StyleSheet.create({
+  seenCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SP.md,
+    marginTop: SP.lg,
+    backgroundColor: '#ffffff',
+    borderRadius: SP.lg + 2,
+    paddingVertical: SP.md,
+    paddingHorizontal: SP.md,
+    ...SOFT_SHADOW,
+  },
+  seenTitle: { fontFamily: F.bold, fontSize: FS.md, color: INK },
+  seenText: { fontFamily: F.medium, fontSize: FS.sm, color: '#4A4F66', marginTop: 1 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm, marginTop: SP.md },
   topNowRow: { flexDirection: 'row', alignItems: 'center', gap: SP.xs + 2, marginTop: SP.md },
   topNowText: { flexShrink: 1, fontFamily: F.regular, fontSize: FS.sm, color: '#AFC0E8' },
@@ -2788,7 +2764,14 @@ export default function HomeScreen() {
 
   useEffect(() => {
     isDailyMomentEnabled().then(setDailyMomentOn).catch(() => {});
+    // 1.5.6: eski sürümde kurulmuş "yeni an" / "kilit bitti" hatırlatmaları varsa iptal et
+    cancelMomentEndNotification().catch(() => {});
+    cancelLockEndNotification().catch(() => {});
   }, []);
+
+  // 1.5.6: Günün Sorusu sonucu kapatılınca "peki şu an ne yapıyorsun?" satırı (an seçilince kalkar)
+  const [resultSeen, setResultSeen] = useState(false);
+  useEffect(() => onResultSeen(() => setResultSeen(true)), []);
 
   async function ensureNotifPermission(): Promise<boolean> {
     let ok = await hasNotificationPermission().catch(() => false);
@@ -2807,14 +2790,6 @@ export default function HomeScreen() {
       );
     }
     return ok;
-  }
-
-  async function askLockAlert() {
-    if (!lock) return;
-    tap(true);
-    if (!(await ensureNotifPermission())) return;
-    const ok = await scheduleLockEndNotification(lock.startedAt + SESSION_MS, lang);
-    if (ok) setLockAlertFor(lock.startedAt);
   }
 
   async function toggleDailyMoment(next: boolean) {
@@ -3634,22 +3609,6 @@ export default function HomeScreen() {
                 ]}
               />
             </View>
-            <View style={hs.notifyRow}>
-              <Ionicons name={endNotify ? 'notifications' : 'notifications-outline'} size={16} color={endNotify ? fg : SOFT} />
-              <Text style={[hs.notifyText, { flex: 1 }]} numberOfLines={2}>
-                {lang === 'tr' ? '1 saat sonra hatırlat' : 'Remind me in an hour'}
-                <Text style={hs.notifySub}>{lang === 'tr' ? ' · günde en fazla 2 kez' : ' · up to twice a day'}</Text>
-              </Text>
-              <Switch
-                value={endNotify}
-                onValueChange={toggleEndNotify}
-                trackColor={{ false: '#D9DBE1', true: fg }}
-                thumbColor="#ffffff"
-                ios_backgroundColor="#D9DBE1"
-                style={{ transform: [{ scale: 0.8 }] }}
-                accessibilityLabel={lang === 'tr' ? '1 saat sonra bana hatırlat' : 'Remind me in an hour'}
-              />
-            </View>
           </View>
 
           <View style={styles.buttonsRow}>
@@ -3983,6 +3942,18 @@ export default function HomeScreen() {
               </PressableScale>
             ) : null}
 
+            {resultSeen && !lockVisible ? (
+              <View style={hs.seenCard}>
+                <Ionicons name="checkmark-circle" size={26} color="#4F46E5" />
+                <View style={{ flex: 1 }}>
+                  <Text style={hs.seenTitle}>{lang === 'tr' ? 'Sonucu gördün.' : "You've seen the result."}</Text>
+                  <Text style={hs.seenText}>
+                    {lang === 'tr' ? 'Peki şu an ne yapıyorsun? Aşağıdan seç.' : 'So what are you doing right now? Pick below.'}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
             <Modal
               visible={lockNotice && lockVisible}
               transparent
@@ -4001,18 +3972,6 @@ export default function HomeScreen() {
                           ? `Şu an "${activityName(lock!.id, lang)}" anındasın. Yeni bir an seçmek için ${lockLeft} dk kaldı.`
                           : `You're in your "${activityName(lock!.id, lang)}" moment. A new one opens in ${lockLeft} min.`}
                       </Text>
-                      {lockAlertSet ? (
-                        <Text style={[hs.noticeText, { color: ACTIVITIES_BY_ID[lock!.id].fg }]}>
-                          {lang === 'tr' ? '✓ Kilit bitince sana haber vereceğiz.' : "✓ We'll let you know when it opens."}
-                        </Text>
-                      ) : (
-                        <Pressable style={hs.noticeAsk} onPress={askLockAlert} accessibilityRole="button">
-                          <Ionicons name="notifications-outline" size={17} color={ACTIVITIES_BY_ID[lock!.id].fg} />
-                          <Text style={[hs.noticeAskText, { color: ACTIVITIES_BY_ID[lock!.id].fg }]}>
-                            {lang === 'tr' ? 'An bitince sana haber verelim mi?' : 'Want us to tell you when it opens?'}
-                          </Text>
-                        </Pressable>
-                      )}
                       <View style={hs.noticeButtons}>
                         <Pressable
                           style={hs.noticeGhost}
@@ -4236,14 +4195,14 @@ const styles = StyleSheet.create({
   topRow3: { flexDirection: 'row', gap: SP.sm },
   topCardWrap: { flex: 1 },
   topCard: {
-    minHeight: 80,
+    height: 96, // 1.5.6: üç kart eşit boyda; ikon üstte sabit, ad altında (tek ya da iki satır)
     borderRadius: SP.lg,
-    paddingVertical: SP.sm + 2,
+    paddingTop: SP.md,
     paddingHorizontal: SP.sm,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
   },
-  topCardNameSmall: { fontSize: 11.5, letterSpacing: -0.2 },
+  topCardNameSmall: { fontSize: 12, letterSpacing: -0.2 },
   topCardName: {
     fontFamily: F.bold,
     fontSize: FS.sm,

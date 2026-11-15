@@ -34,10 +34,12 @@ import {
   questionText,
   SERIES_LENGTH,
   THEMES,
+  nextHint,
   themeOf,
 } from '@/lib/dailyQuestion';
 import { StoryShareCard, STORY_H, STORY_W } from '@/components/StoryShareCard';
 import { track } from '@/lib/analytics';
+import { noteResultSeen } from '@/lib/overlay';
 import { activityName } from '@/lib/i18n';
 import { getTier, TierId } from '@/lib/badges';
 import { fetchSelamSummary, SelamSummary } from '@/lib/selam';
@@ -52,7 +54,7 @@ import {
 
 
 const NAVY = '#0F2A52';
-const AMBER = '#FBBF24';
+const AMBER = '#F4B88A'; // 1.5.6: sarı yerine şeftali (sarı + lacivert birleşimi kullanılmıyor)
 const AMBER_FG = '#B45309';
 const F = { regular: 'DMSans_400Regular', medium: 'DMSans_500Medium', bold: 'DMSans_700Bold' };
 
@@ -125,6 +127,7 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
 
   const tx = (lang as string) === 'tr' ? TEXT.tr : TEXT.en;
   const { question, myKey, result, isYesterday } = data;
+  const hint = nextHint(question, lang);
   const theme = themeOf(question);
   const t = THEMES[theme];
 
@@ -241,6 +244,7 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
 
   function finish(uri: string | null) {
     setVisible(false);
+    noteResultSeen(); // ana ekran "peki şu an ne yapıyorsun?" satırını göstersin
     onClose(uri);
   }
 
@@ -405,6 +409,17 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
                   </Animated.View>
                 ) : null}
 
+                {/* 1.5.6: yarının sorusundan ipucu (yalnızca bugünün sonucunda; soru açık edilmez) */}
+                {hint && !isYesterday ? (
+                  <Animated.View style={[styles.hintCard, { opacity: verdictAnim }]}>
+                    <Text style={styles.hintEmoji}>👀</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.hintKicker}>{(lang as string) === 'tr' ? 'YARININ SORUSU' : "TOMORROW'S QUESTION"}</Text>
+                      <Text style={styles.hintText}>{hint}</Text>
+                    </View>
+                  </Animated.View>
+                ) : null}
+
                 {/* 2) Paylaş (kapatmak için üstteki çarpı) */}
                 {watcher ? (
                   <Animated.View style={[styles.watchBox, { opacity: verdictAnim }]}>
@@ -478,6 +493,19 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.14)',
     gap: 4,
   },
+  hintCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.09)',
+  },
+  hintEmoji: { fontSize: 26 },
+  hintKicker: { fontFamily: F.bold, fontSize: 10.5, letterSpacing: 1, color: '#A5B4FC' },
+  hintText: { fontFamily: F.bold, fontSize: 15.5, lineHeight: 21, color: '#ffffff', marginTop: 2 },
   predCardHit: { backgroundColor: 'rgba(79,70,229,0.55)', borderColor: '#A5B4FC' },
   predTitle: { fontFamily: F.bold, fontSize: 17, color: '#ffffff' },
   predText: { fontFamily: F.medium, fontSize: 13.5, color: 'rgba(255,255,255,0.82)' },

@@ -54,6 +54,8 @@ import {
 } from '@/lib/dailyQuestion';
 import { DailyResultReveal } from '@/components/DailyResultReveal';
 import { scheduleResultNotification } from '@/lib/notifications';
+import { acceptNotifAsk, canAskNotif, noteNotifAsk } from '@/lib/notifAsk';
+import { registerPushToken } from '@/lib/ask';
 import { track } from '@/lib/analytics';
 import { isOverlayBusy, setOverlayBusy, whenOverlayFree } from '@/lib/overlay';
 import { isFirstDay } from '@/lib/firstRun';
@@ -87,6 +89,12 @@ const TEXT = {
     label: 'GÜNÜN SORUSU',
     day: (n: number) => (n === 1 ? 'İlk günün' : `${n}. günün`),
     hint: "Herkese aynı soru. Sonuç akşam 21:00'de.",
+    askTitle: "Sonuç 21:00'de açıklanacak",
+    askText: 'Çoğunluk ne dedi, tahminin tuttu mu? Açıklanınca sana haber verelim.',
+    askYes: 'Haber ver',
+    askNo: 'Şimdi değil',
+    askNote: 'Gereksiz bildirim göndermeyiz.',
+    askDone: "✓ Tamam, 21:00'de haber vereceğiz.",
     predictIntro: 'Cevabın alındı ✓ Şimdi bonus tur',
     predictAbout: 'Soru',
     predictLabel: 'BONUS · TAHMİN ET 🎯',
@@ -112,6 +120,12 @@ const TEXT = {
     label: 'QUESTION OF THE DAY',
     day: (n: number) => (n === 1 ? 'Your first day' : `Your day ${n}`),
     hint: 'Same question for everyone. Results at 9 pm.',
+    askTitle: 'Results are out at 9 PM',
+    askText: "What did most people say, and did your guess hit? We'll let you know when it's out.",
+    askYes: 'Notify me',
+    askNo: 'Not now',
+    askNote: "We won't send unnecessary notifications.",
+    askDone: "✓ Done. We'll let you know at 9 PM.",
     predictIntro: 'Answer saved ✓ Now a bonus round',
     predictAbout: 'Question',
     predictLabel: 'BONUS · MAKE A GUESS 🎯',
@@ -149,6 +163,8 @@ export function DailyQuestionGate() {
   const [question, setQuestion] = useState<DailyQuestion | null>(null);
   const [lang, setLang] = useState<Lang>('tr');
   const [phase, setPhase] = useState<Phase>('question');
+  // 1.5.6: cevap verilince bildirim izni sorusu ('ask': soruluyor · 'ok': izin alındı · 'no': gösterme)
+  const [askNotif, setAskNotif] = useState<'no' | 'ask' | 'ok'>('no');
   const [picked, setPicked] = useState<string | null>(null);
   const [streak, setStreak] = useState(0);
   const [answer, setAnswer] = useState<string | null>(null); // 1.5.4: verilen cevap (tahmin adımında gösterilir)
@@ -341,6 +357,17 @@ export function DailyQuestionGate() {
   }
 
   function showDone() {
+    // 1.5.6: bildirim izni yoksa tam bu anda sorulur ("Sonuç 21:00'de açıklanacak")
+    if (answeredNow.current) {
+      canAskNotif()
+        .then((ok) => {
+          if (!ok) return;
+          setAskNotif('ask');
+          noteNotifAsk().catch(() => {});
+          track('notif_ask_shown', { source: 'gate' });
+        })
+        .catch(() => {});
+    }
     setPhase('done');
     doneAnim.setValue(0);
     Animated.spring(doneAnim, { toValue: 1, useNativeDriver: true, speed: 14, bounciness: 8 }).start();
@@ -362,6 +389,26 @@ export function DailyQuestionGate() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     setPicked(answer);
     showDone();
+  }
+
+  async function onNotifYes() {
+    Haptics.selectionAsync().catch(() => {});
+    const r = await acceptNotifAsk();
+    track('notif_ask_answer', { answer: r });
+    if (r === 'granted') {
+      setAskNotif('ok');
+      registerPushToken(true).catch(() => {});
+      if (question) {
+        const o = question.options.find((x) => x.key === answer);
+        scheduleResultNotification(question.day_date, o ? clubName(o, lang) : null);
+      }
+    } else setAskNotif('no');
+  }
+
+  function onNotifNo() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    track('notif_ask_answer', { answer: 'later' });
+    setAskNotif('no');
   }
 
   async function onSkip() {
@@ -508,10 +555,25 @@ export function DailyQuestionGate() {
             </View>
           )}
 
-          {phase === 'done' ? (
-            <Pressable onPress={close} style={styles.continueBtn} accessibilityRole="button">
-              <Text style={styles.continueText}>{tx.continue}</Text>
-            </Pressable>
+          {phase === 'done' && askNotif === 'ask' ? (
+            <View style={styles.askBox}>
+              <Text style={styles.askTitle}>{tx.askTitle}</Text>
+              <Text style={styles.askText}>{tx.askText}</Text>
+              <Pressable onPress={onNotifYes} style={styles.continueBtn} accessibilityRole="button">
+                <Text style={styles.continueText}>{tx.askYes}</Text>
+              </Pressable>
+              <Pressable onPress={onNotifNo} style={styles.askLater} accessibilityRole="button" hitSlop={8}>
+                <Text style={styles.askLaterText}>{tx.askNo}</Text>
+              </Pressable>
+              <Text style={styles.askNote}>{tx.askNote}</Text>
+            </View>
+          ) : phase === 'done' ? (
+            <>
+              {askNotif === 'ok' ? <Text style={styles.askDone}>{tx.askDone}</Text> : null}
+              <Pressable onPress={close} style={styles.continueBtn} accessibilityRole="button">
+                <Text style={styles.continueText}>{tx.continue}</Text>
+              </Pressable>
+            </>
           ) : predicting ? (
             <View style={styles.footer}>
               <Pressable onPress={skipPrediction} style={styles.footerBtn} accessibilityRole="button" disabled={phase === 'predicting'}>
@@ -536,6 +598,13 @@ export function DailyQuestionGate() {
 }
 
 const styles = StyleSheet.create({
+  askBox: { marginTop: 16, alignItems: 'stretch' },
+  askTitle: { fontFamily: F.bold, fontSize: 19, color: INK, textAlign: 'center' },
+  askText: { fontFamily: F.medium, fontSize: 14.5, lineHeight: 20, color: '#4A4F66', textAlign: 'center', marginTop: 6, marginBottom: 2 },
+  askLater: { alignSelf: 'center', paddingVertical: 12 },
+  askLaterText: { fontFamily: F.bold, fontSize: 15, color: '#6B7085' },
+  askNote: { fontFamily: F.medium, fontSize: 12, color: '#8A8FA3', textAlign: 'center' },
+  askDone: { fontFamily: F.bold, fontSize: 14, color: '#3F3BC9', textAlign: 'center', marginTop: 14 },
   earned: { fontFamily: 'DMSans_500Medium', fontSize: 12.5, color: '#3F3BC9', marginTop: 8, textAlign: 'center' },
   root: {
     flex: 1,

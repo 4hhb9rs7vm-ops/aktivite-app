@@ -50,3 +50,19 @@ export function whenOverlayFree(cb: () => void, except?: string): () => void {
     freeListeners.delete(f);
   };
 }
+
+// 1.5.6: Günün Sorusu sonucu kapatılınca ana ekran "peki şu an ne yapıyorsun?" satırını gösterir.
+const resultSeenListeners = new Set<() => void>();
+export function noteResultSeen(): void {
+  resultSeenListeners.forEach((f) => {
+    try {
+      f();
+    } catch {}
+  });
+}
+export function onResultSeen(cb: () => void): () => void {
+  resultSeenListeners.add(cb);
+  return () => {
+    resultSeenListeners.delete(cb);
+  };
+}

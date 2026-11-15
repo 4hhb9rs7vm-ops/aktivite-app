@@ -25,6 +25,9 @@ export type DailyQuestion = {
   options: DQOption[];
   theme?: DQTheme | null; // kartın renk teması
   art_svg?: string | null; // sorunun çizimi (SVG metni, Supabase'te duruyor)
+  // 1.5.6: ertesi günün sorusuna dair ipucu (soruyu açık etmeden); sonuç ekranında gösterilir
+  next_hint_tr?: string | null;
+  next_hint_en?: string | null;
 };
 
 export type DQResult = {
@@ -55,6 +58,7 @@ export const SERIES_LENGTH = 30;
 const RESULT_HOUR = 21; // sonuçlar 21:00'de (İstanbul)
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const USE_COUNTRY_RESULT = false; // 1.5.6: ülke sonucu kapalı, herkes genel sonucu görür
 const MIN_COUNTRY_TOTAL = 30; // ülkede en az bu kadar cevap varsa ülke sonucu, yoksa dünya sonucu
 
 // ---- Değişiklik haberi: cevap verilince / sonuç görülünce alt banttaki nokta yenilensin
@@ -75,6 +79,8 @@ function notifyPollsChanged() {
 }
 
 const QUESTION_FIELDS = 'id, day_date, series_day, question_tr, question_en, question_ko, options, theme, art_svg';
+// 1.5.6: ipucu sütunları sunucuda henüz yoksa sorgu hata verir; o zaman eski alan listesiyle yeniden denenir
+const QUESTION_FIELDS_HINT = QUESTION_FIELDS + ', next_hint_tr, next_hint_en';
 
 // Türkiye saati yıl boyu UTC+3 (yaz saati yok)
 export function istanbulToday(d: Date = new Date()): string {
@@ -120,12 +126,20 @@ export function optionLabel(o: DQOption, lang: Lang): string {
   return (lang as string) === 'tr' ? o.tr : o.en || o.tr;
 }
 
+// 1.5.6: yarının sorusuna dair ipucu (yoksa null)
+export function nextHint(q: DailyQuestion, lang: Lang): string | null {
+  const t = (lang as string) === 'tr' ? q.next_hint_tr : q.next_hint_en ?? null;
+  return t && t.trim() ? t.trim() : null;
+}
+
 export function clubName(o: DQOption, lang: Lang): string | null {
   return ((lang as string) === 'tr' ? o.club_tr : o.club_en) || null;
 }
 
 async function fetchQuestionByDate(day: string): Promise<DailyQuestion | null> {
   if (!(await ensureSession())) return null;
+  const first = await supabase.from('daily_questions').select(QUESTION_FIELDS_HINT).eq('day_date', day).maybeSingle();
+  if (!first.error) return (first.data as DailyQuestion | null) ?? null;
   const { data, error } = await supabase
     .from('daily_questions')
     .select(QUESTION_FIELDS)
@@ -234,11 +248,14 @@ export async function submitAnswer(q: DailyQuestion, optionKey: string, lang: La
 
 type ResultRow = { question_id: number; scope: string; option_key: string; total: number; pct: number | string };
 
-// Bir sorunun satırlarından gösterilecek sonucu seç: ülkede yeterli cevap varsa ülke, yoksa dünya.
+// Bir sorunun satırlarından gösterilecek sonucu seç.
+// 1.5.6: herkes aynı sonucu görür (bütün cevaplar). Önceden ülkesini girmiş olanlar ülke sonucunu,
+// girmeyenler genel sonucu görüyordu; iki farklı "çoğunluk" çıkıyor, tahmin puanı da (sunucuda genel
+// sonuca göre) ekrandakiyle uyuşmuyordu.
 function pickResult(q: DailyQuestion, rows: ResultRow[]): DQResult | null {
   const local = rows.filter((r) => r.scope !== 'world');
   const world = rows.filter((r) => r.scope === 'world');
-  const useLocal = local.length > 0 && Number(local[0].total) >= MIN_COUNTRY_TOTAL;
+  const useLocal = USE_COUNTRY_RESULT && local.length > 0 && Number(local[0].total) >= MIN_COUNTRY_TOTAL;
   const chosen = useLocal ? local : world;
   if (chosen.length === 0) return null;
   const pct: Record<string, number> = {};

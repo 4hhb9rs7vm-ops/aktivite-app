@@ -184,7 +184,7 @@ export function momentLabel(m: { start: Date; isOpen: boolean }, lang: Lang): st
       ? `Günün Anı ${pad2(h)}:${pad2(min)}'${timeSuffix(h, min)}`
       : `Today's Moment at ${pad2(h)}:${pad2(min)}`;
   }
-  return lang === 'tr' ? 'Günün Anı yarın · şimdi de seçebilirsin' : "Today's Moment is tomorrow · you can still pick now";
+  return lang === 'tr' ? 'Günün Anı yarın' : "Today's Moment: tomorrow";
 }
 
 const DAY_NAMES = {

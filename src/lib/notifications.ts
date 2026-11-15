@@ -2,6 +2,8 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { serverResultPushOn } from '@/lib/flags';
+
 import { loadLang, NOTIF_TEXT } from '@/lib/i18n';
 
 // ---- Ayarlar ----
@@ -217,6 +219,11 @@ export async function scheduleResultNotification(day: string, club: string | nul
     if (!Notifications) return;
     if (!(await isDailyMomentEnabled())) return;
     if (!(await hasNotificationPermission())) return;
+    // 1.5.6: sonuç bildirimini sunucu kişiye özel gönderiyorsa telefonda ayrıca kurulmaz (çift bildirim olmasın)
+    if (await serverResultPushOn()) {
+      await Notifications.cancelScheduledNotificationAsync(RESULT_ID_PREFIX + day).catch(() => {});
+      return;
+    }
 
     const [y, m, d] = day.split('-').map(Number);
     const at = new Date(Date.UTC(y, m - 1, d, 18, 0, 0));

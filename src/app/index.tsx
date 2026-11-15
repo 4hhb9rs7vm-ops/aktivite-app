@@ -130,7 +130,7 @@ import { checkBadges } from '@/lib/badges';
 import { fetchLatestSelamSummary, onSelamChanged, SelamSummary } from '@/lib/selam';
 import { answerAsks, onOpenTab, registerPushToken } from '@/lib/ask';
 import { notifAskedRecently } from '@/lib/notifAsk';
-import { onResultSeen } from '@/lib/overlay';
+import { onResultSeen, type SeenKind } from '@/lib/overlay';
 import { isOverlayBusy, setOverlayBusy, whenOverlayFree } from '@/lib/overlay';
 import {
   deleteFriendData,
@@ -2373,6 +2373,7 @@ export default function HomeScreen() {
   const [welcomeCheck, setWelcomeCheck] = useState(0);
   const pendingShareUri = useRef<string | null>(null);
   const pendingShareMsg = useRef<string | null>(null); // 1.5.7: yazılı mesaj paylaşımı
+  const shareBusy = useRef(false); // davet bağlantısı hazırlanırken ikinci dokunuşu yut
   const sharePct = useRef<number | null>(null); // paylaşım mesajındaki oran
   const [shareBonusOpen, setShareBonusOpen] = useState(false); // ilk paylaşım puanı duruyor mu
   const [shareTipRect, setShareTipRect] = useState<TipRect | null>(null);
@@ -2790,8 +2791,8 @@ export default function HomeScreen() {
   }, []);
 
   // 1.5.6: Günün Sorusu sonucu kapatılınca "peki şu an ne yapıyorsun?" satırı (an seçilince kalkar)
-  const [resultSeen, setResultSeen] = useState(false);
-  useEffect(() => onResultSeen(() => setResultSeen(true)), []);
+  const [resultSeen, setResultSeen] = useState<SeenKind | null>(null);
+  useEffect(() => onResultSeen((kind) => setResultSeen(kind)), []);
 
   async function ensureNotifPermission(): Promise<boolean> {
     let ok = await hasNotificationPermission().catch(() => false);
@@ -3156,13 +3157,15 @@ export default function HomeScreen() {
       .then((c) => setShareBonusOpen(!c))
       .catch(() => {});
     setSharePreviewOpen(true);
-    prepareStoryLink().catch(() => {});
   }
 
   // 1.5.2: hikâyeye eklenecek link. Görünen adı olan (arkadaş özelliğini kuran) kişide kendi davet linki,
   // yoksa indirme linki. Paylaş'a basınca panoya kopyalanır.
-  const [storyLink, setStoryLink] = useState<{ url: string; invite: boolean } | null>(null);
-  async function prepareStoryLink() {
+  const [storyLink, setStoryLink] = useState<{ url: string; invite: boolean; until: number } | null>(null);
+  // 1.5.7: davet, panel açılınca değil paylaşma düğmesine basılınca oluşturulur
+  // (kişi paylaşmadan vazgeçerse Arkadaşlar'da kendi açmadığı bir davet görmesin).
+  async function prepareStoryLink(): Promise<{ url: string; invite: boolean }> {
+    if (storyLink?.invite && storyLink.until > Date.now()) return storyLink;
     try {
       if (me.displayName) {
         const list = await getMyInvites();
@@ -3173,12 +3176,13 @@ export default function HomeScreen() {
           if ('invite' in r) inv = r.invite;
         }
         if (inv) {
-          setStoryLink({ url: inviteUrl(inv.code, me.displayName), invite: true });
-          return;
+          const link = { url: inviteUrl(inv.code, me.displayName), invite: true, until: inv.expiresAt };
+          setStoryLink(link);
+          return link;
         }
       }
     } catch {}
-    setStoryLink({ url: INVITE_URL, invite: false });
+    return { url: INVITE_URL, invite: false };
   }
 
   // Önizlemede "Paylaş": görseli panel açıkken üret, paneli kapat,
@@ -3205,7 +3209,7 @@ export default function HomeScreen() {
     }
     pendingShareUri.current = uri;
     // Hikâyedeki link etiketine yapıştırmak için linki panoya kopyala
-    const link = storyLink ?? { url: INVITE_URL, invite: false };
+    const link = await prepareStoryLink();
     Clipboard.setStringAsync(link.url).catch(() => {});
     track('app_share', { from: 'story', invite: link.invite });
     setSharePreviewOpen(false);
@@ -3214,10 +3218,12 @@ export default function HomeScreen() {
   }
 
   // 1.5.7 "Arkadaşına gönder": yazılı mesaj, bağlantı (varsa kişisel davet bağlantısı) içinde gider.
-  function shareMessage() {
-    if (!selected) return;
+  async function shareMessage() {
+    if (!selected || shareBusy.current) return;
     tap();
-    const link = storyLink ?? { url: INVITE_URL, invite: false };
+    shareBusy.current = true;
+    const link = await prepareStoryLink();
+    shareBusy.current = false;
     const p = sharePct.current;
     const pctText =
       typeof p === 'number'
@@ -3766,7 +3772,7 @@ export default function HomeScreen() {
               bg={bg}
               lang={lang}
               hint={
-                storyLink?.invite
+                me.displayName
                   ? lang === 'tr'
                     ? 'Davet bağlantın mesajın içinde gider: katılan her arkadaş için ikinize de 50 puan. Hikâyede bağlantı kopyalanır, link etiketine yapıştır.'
                     : 'Your invite link goes inside the message: 50 points for both of you for every friend who joins. For stories the link is copied; paste it into a link sticker.'
@@ -4052,7 +4058,15 @@ export default function HomeScreen() {
               <View style={hs.seenCard}>
                 <Ionicons name="checkmark-circle" size={26} color="#4F46E5" />
                 <View style={{ flex: 1 }}>
-                  <Text style={hs.seenTitle}>{lang === 'tr' ? 'Sonucu gördün.' : "You've seen the result."}</Text>
+                  <Text style={hs.seenTitle}>
+                    {resultSeen === 'answer'
+                      ? lang === 'tr'
+                        ? 'Cevabın alındı.'
+                        : 'Answer saved.'
+                      : lang === 'tr'
+                        ? 'Sonucu gördün.'
+                        : "You've seen the result."}
+                  </Text>
                   <Text style={hs.seenText}>
                     {lang === 'tr' ? 'Peki şu an ne yapıyorsun? Aşağıdan seç.' : 'So what are you doing right now? Pick below.'}
                   </Text>

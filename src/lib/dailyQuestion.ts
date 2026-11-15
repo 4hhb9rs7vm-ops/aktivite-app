@@ -4,6 +4,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ensureSession, supabase } from '@/lib/supabase';
 import type { Lang } from '@/lib/i18n';
+import { noteResultSeen } from '@/lib/overlay';
 
 export type DQOption = {
   key: string;
@@ -243,6 +244,8 @@ export async function submitAnswer(q: DailyQuestion, optionKey: string, lang: La
   }
   await saveLocalAnswer(q.day_date, saved);
   notifyPollsChanged();
+  // 1.5.7: bugünün sorusu cevaplandı; ana ekran "peki şu an ne yapıyorsun?" satırını göstersin
+  if (q.day_date === istanbulToday()) noteResultSeen('answer');
   return saved;
 }
 

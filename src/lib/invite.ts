@@ -10,7 +10,7 @@ import { ensureSession, supabase } from '@/lib/supabase';
 import { track } from '@/lib/analytics';
 import { requestNotificationPermission } from '@/lib/notifications';
 import { registerPushToken } from '@/lib/ask';
-import { noteInviteBonusJoined } from '@/lib/prediction';
+import { claimShareBonus, noteInviteBonusJoined } from '@/lib/prediction';
 
 // Davet sayfası (web). Alan adı gelince sadece bu satır değişir.
 export const INVITE_PAGE = 'https://4hhb9rs7vm-ops.github.io/aktivite-app/d/';
@@ -189,11 +189,16 @@ export async function shareInviteWhatsApp(message: string): Promise<void> {
   } catch {
     await Share.share({ message }).catch(() => {});
   }
+  // 1.5.7: davet bağlantısını göndermek de "ilk paylaşım" sayılır (bir kereliğine 25 puan)
+  claimShareBonus().catch(() => {});
 }
 
 export async function shareInviteOther(message: string): Promise<void> {
   track('invite_shared', { via: 'share' });
-  await Share.share({ message }).catch(() => {});
+  try {
+    const r = await Share.share({ message });
+    if (r.action !== Share.dismissedAction) claimShareBonus().catch(() => {});
+  } catch {}
 }
 
 // ---- Linkten gelen kod ----

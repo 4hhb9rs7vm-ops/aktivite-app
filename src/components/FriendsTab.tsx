@@ -42,7 +42,7 @@ import {
 } from '@/lib/friends';
 import { checkDisplayName, cleanDisplayName, Me, NAME_MAX, nameError, nameLength } from '@/lib/me';
 import { Avatar, QrSheet } from '@/components/QrSheet';
-import { whenOverlayFree } from '@/lib/overlay';
+import { setOverlayBusy, whenOverlayFree } from '@/lib/overlay';
 import { hasNotificationPermission, requestNotificationPermission } from '@/lib/notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AskResult, getAllowAsks, recentAsks, registerPushToken, sendAsk, setAllowAsks } from '@/lib/ask';
@@ -1519,6 +1519,12 @@ function Sheet({
   bottomInset: number;
   children: ReactNode;
 }) {
+  // 1.5.7: panel açıkken puan kutlaması gibi diğer pencereler beklesin (iPhone iki pencereyi üst üste açamıyor)
+  const busyName = useRef('friends_sheet_' + Math.random().toString(36).slice(2)).current;
+  useEffect(() => {
+    setOverlayBusy(busyName, visible);
+    return () => setOverlayBusy(busyName, false);
+  }, [visible, busyName]);
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       {/* Klavye açılınca panel yukarı kalksın (davet kodu yazarken alan klavyenin altında kalıyordu) */}

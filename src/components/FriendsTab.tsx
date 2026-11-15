@@ -178,7 +178,7 @@ const T = {
     inviteCodeLabel: 'DAVET KODU',
     sendWhatsApp: "WhatsApp'ta gönder",
     sendOther: 'Başka yolla paylaş',
-    inviteNote: 'Linki açıp kabul eden arkadaşın olur, sana haber gelir.\nİstemediğin biri eklenirse listeden kaldırabilirsin.',
+    inviteNote: 'Linki açıp kabul eden arkadaşın olur, ikiniz de 50 puan kazanırsınız.\nİstemediğin biri eklenirse listeden kaldırabilirsin.',
     inviteErr: {
       no_profile: 'Önce görünen adını seç.',
       limit_me: 'Arkadaş sınırına ulaştın (50).',
@@ -314,7 +314,7 @@ const T = {
     inviteCodeLabel: 'INVITE CODE',
     sendWhatsApp: 'Send on WhatsApp',
     sendOther: 'Share another way',
-    inviteNote: "Whoever opens the link and accepts becomes your friend; you'll be notified.\nYou can remove anyone you don't want.",
+    inviteNote: "Whoever opens the link and accepts becomes your friend, and you both get 50 points.\nYou can remove anyone you don't want.",
     inviteErr: {
       no_profile: 'Choose your display name first.',
       limit_me: "You've reached the friend limit (50).",

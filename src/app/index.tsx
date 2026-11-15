@@ -110,12 +110,13 @@ import {
 } from '@/lib/notifications';
 import { FRIENDS_TAB_ENABLED, loadMe, Me, ME_KEY, onProfileChanged, saveMe, STUDENT } from '@/lib/me';
 import * as Clipboard from 'expo-clipboard';
-import { createInvite, getMyInvites, inviteUrl } from '@/lib/invite';
+import { createInvite, getMyInvites, inviteUrl, momentMessage } from '@/lib/invite';
+import { InviteAskHost } from '@/components/InviteAsk';
 import { answerStudent, cancelLeagueNotification, markHomeReturn } from '@/lib/campus';
 import { CampusSchoolPicker } from '@/components/CampusLeague';
 import { initFirstRun, resetFirstRun } from '@/lib/firstRun';
 import { PointsMomentHost, PredictionChip, PredictionWeeklyHost, WelcomePointsHost } from '@/components/Prediction';
-import { pointsChanged } from '@/lib/prediction';
+import { claimShareBonus, pointsChanged, shareBonusClaimed, SHARE_POINTS } from '@/lib/prediction';
 import { UNIVERSITY_OTHER } from '@/lib/universities';
 import { TAB_BAR_HEIGHT, TabBar, TabId } from '@/components/TabBar';
 import { MeTab } from '@/components/MeTab';
@@ -1277,7 +1278,7 @@ function FilterSegment({
 const STORY_W = 360;
 const STORY_H = 640;
 const STORY_BG = '#0E2850';
-const STORY_ACCENT = '#FBBF24';
+const STORY_ACCENT = '#F4B88A'; // 1.5.6: paylaşım kartında sarı yerine şeftali
 
 // Kaydedilen (ekran dışı) kart
 function StoryCard({ innerRef, story }: { innerRef: React.RefObject<View | null>; story: Story }) {
@@ -1363,7 +1364,7 @@ function StoryCardBody({
 }
 
 // Paylaşmadan önce kartın önizlemesini gösteren alt panel
-const PREVIEW_W = 200;
+const PREVIEW_W = 176; // 1.5.7: ikinci düğmeye yer açmak için biraz küçüldü
 const PREVIEW_SCALE = PREVIEW_W / STORY_W;
 
 function SharePreviewSheet({
@@ -1373,8 +1374,10 @@ function SharePreviewSheet({
   bg,
   lang,
   hint,
+  bonus,
   cancelLabel,
   onShare,
+  onMessage,
   onClose,
   onDismiss,
 }: {
@@ -1384,13 +1387,23 @@ function SharePreviewSheet({
   bg: string;
   lang: Lang;
   hint: string;
+  bonus: boolean; // ilk paylaşım puanı henüz alınmadı
   cancelLabel: string;
   onShare: () => void;
+  onMessage: () => void;
   onClose: () => void;
   onDismiss?: () => void;
 }) {
-  const title = lang === 'tr' ? 'Paylaşmaya hazır' : 'Ready to share';
-  const shareLabel = lang === 'tr' ? 'Paylaş' : 'Share';
+  const T = lang === 'tr';
+  const title = bonus
+    ? T
+      ? `Paylaş, +${SHARE_POINTS} puan kazan`
+      : `Share and get +${SHARE_POINTS} points`
+    : T
+      ? 'Paylaşmaya hazır'
+      : 'Ready to share';
+  const messageLabel = T ? 'Arkadaşına gönder' : 'Send to a friend';
+  const shareLabel = T ? 'Hikâyende paylaş' : 'Share to your story';
   return (
     <Modal
       visible={visible}
@@ -1414,9 +1427,13 @@ function SharePreviewSheet({
             <Ionicons name="link-outline" size={18} color={fg} />
             <Text style={styles.sheetHintText}>{hint}</Text>
           </View>
-          <Pressable style={[styles.primaryAction, { backgroundColor: fg }]} onPress={onShare}>
-            <Ionicons name="share-social-outline" size={18} color="#ffffff" />
-            <Text style={styles.primaryActionText}>{shareLabel}</Text>
+          <Pressable style={[styles.primaryAction, { backgroundColor: fg }]} onPress={onMessage} accessibilityRole="button">
+            <Ionicons name="chatbubble-ellipses-outline" size={18} color="#ffffff" />
+            <Text style={styles.primaryActionText}>{messageLabel}</Text>
+          </Pressable>
+          <Pressable style={[styles.primaryAction, styles.secondAction]} onPress={onShare} accessibilityRole="button">
+            <Ionicons name="share-social-outline" size={18} color={INK} />
+            <Text style={[styles.primaryActionText, { color: INK }]}>{shareLabel}</Text>
           </Pressable>
           <Pressable style={styles.sheetCancel} onPress={onClose}>
             <Text style={styles.sheetCancelText}>{cancelLabel}</Text>
@@ -2355,6 +2372,9 @@ export default function HomeScreen() {
   }, [welcomeOpen, welcomeSchoolOpen]);
   const [welcomeCheck, setWelcomeCheck] = useState(0);
   const pendingShareUri = useRef<string | null>(null);
+  const pendingShareMsg = useRef<string | null>(null); // 1.5.7: yazılı mesaj paylaşımı
+  const sharePct = useRef<number | null>(null); // paylaşım mesajındaki oran
+  const [shareBonusOpen, setShareBonusOpen] = useState(false); // ilk paylaşım puanı duruyor mu
   const [shareTipRect, setShareTipRect] = useState<TipRect | null>(null);
   const shareBtnRef = useRef<View>(null);
   // Kampüs karşılaştırması: sadece öğrenci olup listeden üniversite seçenler için
@@ -3132,6 +3152,9 @@ export default function HomeScreen() {
   function openSharePreview() {
     if (!selected) return;
     tap();
+    shareBonusClaimed()
+      .then((c) => setShareBonusOpen(!c))
+      .catch(() => {});
     setSharePreviewOpen(true);
     prepareStoryLink().catch(() => {});
   }
@@ -3190,7 +3213,37 @@ export default function HomeScreen() {
     setTimeout(openShareSheet, Platform.OS === 'ios' ? 1200 : 450);
   }
 
+  // 1.5.7 "Arkadaşına gönder": yazılı mesaj, bağlantı (varsa kişisel davet bağlantısı) içinde gider.
+  function shareMessage() {
+    if (!selected) return;
+    tap();
+    const link = storyLink ?? { url: INVITE_URL, invite: false };
+    const p = sharePct.current;
+    const pctText =
+      typeof p === 'number'
+        ? lang === 'tr'
+          ? `%${p.toFixed(1).replace('.', ',')}`
+          : `${p.toFixed(1)}%`
+        : null;
+    pendingShareMsg.current = momentMessage(activityName(selected.id, lang), pctText, link.url, lang);
+    track('app_share', { from: 'message', invite: link.invite });
+    setSharePreviewOpen(false);
+    setTimeout(openShareSheet, Platform.OS === 'ios' ? 1200 : 450);
+  }
+
   async function openShareSheet() {
+    const msg = pendingShareMsg.current;
+    if (msg) {
+      pendingShareMsg.current = null;
+      try {
+        const r = await Share.share({ message: msg });
+        if (r.action !== Share.dismissedAction) {
+          track('activity_share', { id: selected?.id ?? null });
+          claimShareBonus().catch(() => {});
+        }
+      } catch {}
+      return;
+    }
     const uri = pendingShareUri.current;
     if (!uri) return;
     pendingShareUri.current = null;
@@ -3199,6 +3252,7 @@ export default function HomeScreen() {
       if (available) {
         await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', UTI: 'public.jpeg', dialogTitle: tx.shareDialog });
         track('activity_share', { id: selected?.id ?? null });
+        claimShareBonus().catch(() => {});
       } else {
         Alert.alert(tx.shareUnavailableTitle, tx.shareUnavailableText);
       }
@@ -3461,6 +3515,47 @@ export default function HomeScreen() {
           </View>
         </View>
       );
+    } else if (filter !== 'world' && value) {
+      // 1.5.6: yaş / şehir / cinsiyet / ülke grubunda yeterli kişi yok: gruba özel mesaj,
+      // boş bırakmak yerine herkesin ne yaptığına yönlendir
+      noData = true;
+      const groupName =
+        filter === 'country' ? countryLabel(value, lang) : filter === 'gender' ? genderLabel(value, lang) : String(value);
+      const title =
+        lang === 'tr'
+          ? filter === 'age'
+            ? `${groupName} yaşta henüz yeterli kişi yok`
+            : `${groupName}: henüz yeterli kişi yok`
+          : filter === 'age'
+            ? `Not enough people aged ${groupName} yet`
+            : `${groupName}: not enough people yet`;
+      body = (
+        <View style={styles.center}>
+          <View style={styles.resultCard}>
+            <View style={[styles.badge, styles.badgeEst]}>
+              <Text style={[styles.badgeText, styles.badgeTextEst]}>{tx.noData}</Text>
+            </View>
+            <View style={[styles.noDataIcon, { backgroundColor: bg }]}>
+              <UsersThree size={32} color={fg} weight="duotone" />
+            </View>
+            <Text style={[styles.noDataTitle, { textAlign: 'center' }]}>{title}</Text>
+            <Text style={styles.note}>
+              {lang === 'tr'
+                ? 'Bu grupta 8 kişi olunca oran burada açılacak. O zamana kadar herkesin ne yaptığına bakabilirsin.'
+                : "The percentage unlocks here once 8 people from this group are active. Until then, see what everyone's doing."}
+            </Text>
+            {others ? (
+              <Pressable style={styles.inviteBtn} onPress={openOthers} accessibilityRole="button">
+                <Text style={styles.inviteText}>{lang === 'tr' ? '👀 Diğerleri ne yapıyor?' : "👀 What's everyone doing?"}</Text>
+              </Pressable>
+            ) : (
+              <Pressable style={styles.inviteBtn} onPress={() => setFilter('world')} accessibilityRole="button">
+                <Text style={styles.inviteText}>{lang === 'tr' ? 'Herkesin oranını gör' : "See everyone's rate"}</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+      );
     } else {
       noData = true;
       body = (
@@ -3512,6 +3607,7 @@ export default function HomeScreen() {
     }
 
 
+    sharePct.current = resultShown && typeof pct === 'number' ? pct : null;
     const story: Story | null = selected
       ? buildStory({
           activityId: selected.id,
@@ -3672,12 +3768,14 @@ export default function HomeScreen() {
               hint={
                 storyLink?.invite
                   ? lang === 'tr'
-                    ? "Paylaş'a basınca davet linkin kopyalanır. Hikâyende link etiketi ekle, yapıştır: dokunan arkadaşın olur (24 saat, ilk 10 kişi)."
-                    : 'Your invite link is copied when you tap Share. Add a link sticker to your story and paste it: whoever taps becomes your friend (24 hours, first 10 people).'
+                    ? 'Davet bağlantın mesajın içinde gider: katılan her arkadaş için ikinize de 50 puan. Hikâyede bağlantı kopyalanır, link etiketine yapıştır.'
+                    : 'Your invite link goes inside the message: 50 points for both of you for every friend who joins. For stories the link is copied; paste it into a link sticker.'
                   : lang === 'tr'
-                    ? "Paylaş'a basınca indirme linki kopyalanır. Hikâyende link etiketi ekle, yapıştır; görenler Şu An'ı hemen bulsun."
-                    : 'The download link is copied when you tap Share. Add a link sticker to your story and paste it so others find Şu An right away.'
+                    ? 'Bağlantı mesajın içinde gider. Arkadaşlar sekmesinde adını yazarsan katılan her arkadaş için ikinize de 50 puan.'
+                    : 'The link goes inside the message. Add your name in the Friends tab to get 50 points each for every friend who joins.'
               }
+              bonus={shareBonusOpen}
+              onMessage={shareMessage}
               cancelLabel={tx.cancel}
               onShare={shareStory}
               onClose={() => setSharePreviewOpen(false)}
@@ -3912,6 +4010,14 @@ export default function HomeScreen() {
             </View>
             <PredictionWeeklyHost lang={lang} />
             <PointsMomentHost lang={lang} streak={streak} />
+            {FRIENDS_TAB_ENABLED ? (
+              <InviteAskHost
+                lang={lang}
+                active={tab === 'now' && !selected && !dashboardOpen}
+                bottomInset={insets.bottom}
+                onInvite={() => setTab('friends')}
+              />
+            ) : null}
           </View>
 
           <View style={styles.homeBody}>
@@ -4399,6 +4505,7 @@ const styles = StyleSheet.create({
     paddingVertical: SP.md + 3,
   },
   primaryActionText: { fontFamily: F.medium, fontSize: FS.md, color: '#ffffff' },
+  secondAction: { backgroundColor: '#F0F1F4', marginTop: SP.sm + 2 },
   secondaryAction: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -4688,8 +4795,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: SP.sm,
-    marginVertical: SP.lg,
-    paddingVertical: SP.md,
+    marginVertical: SP.md + 2,
+    paddingVertical: SP.sm + 2,
     paddingHorizontal: SP.md + 2,
     backgroundColor: '#F4F4F5',
     borderRadius: 14,

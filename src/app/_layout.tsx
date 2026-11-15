@@ -11,6 +11,7 @@ import { DailyQuestionGate } from '@/components/DailyQuestionGate';
 import { initFirstRun } from '@/lib/firstRun';
 import { BadgeCelebration } from '@/components/BadgeCelebration';
 import { CampusLeagueHost } from '@/components/CampusLeague';
+import { BonusMomentHost } from '@/components/Prediction';
 
 // Yerel açılış ekranı (lacivert zemin + logo), ana ekran hazır olana kadar açık kalır.
 // Kapatma işi src/app/index.tsx içinde, yazı tipleri ve veriler yüklenince yapılır.
@@ -85,6 +86,8 @@ export default function RootLayout() {
       <BadgeCelebration />
       {/* 1.5.2 Kampüs Ligi: öğrenci sorusu, okul kilidi, Pazartesi sonucu */}
       <CampusLeagueHost />
+      {/* 1.5.7: ilk paylaşım ve davet puanı kutlaması */}
+      <BonusMomentHost />
     </ThemeProvider>
   );
 }

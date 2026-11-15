@@ -46,7 +46,9 @@ export type EventName =
   | 'prediction_week'
   | 'notif_ask_shown'
   | 'notif_ask_answer'
-  | 'points_moment';
+  | 'points_moment'
+  | 'invite_ask_shown'
+  | 'invite_ask_answer';
 
 type Props = Record<string, string | number | boolean | null>;
 

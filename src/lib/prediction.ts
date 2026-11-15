@@ -111,7 +111,16 @@ export type PointsItem = {
   info: string | null; // alt satır (an: "aktivite|saat", soru/tahmin: soru metni)
   infoEn: string | null;
 };
-export type PointsByKind = { moment: number; question: number; guess: number; streak: number; badge: number; welcome: number };
+export type PointsByKind = {
+  moment: number;
+  question: number;
+  guess: number;
+  streak: number;
+  badge: number;
+  welcome: number;
+  share: number; // 1.5.7: ilk paylaşım
+  invite: number; // 1.5.7: bağlantıdan katılan arkadaşlar
+};
 export const STREAK_STEPS: { day: number; points: number }[] = [
   { day: 3, points: 10 },
   { day: 7, points: 30 },
@@ -197,6 +206,8 @@ export async function fetchPredictionWeeks(force = false): Promise<PredictionWee
         streak: Number(d.by_kind?.streak) || 0,
         badge: Number(d.by_kind?.badge) || 0,
         welcome: Number(d.by_kind?.welcome) || 0,
+        share: Number(d.by_kind?.share) || 0,
+        invite: Number(d.by_kind?.invite) || 0,
       },
       streak: Number(d.streak) || 0,
       history,
@@ -254,6 +265,84 @@ export async function claimWelcomePoints(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ---------------------------------------------------------------- paylaşım ve davet puanları (1.5.7)
+// İlk paylaşım: bir kereliğine 25 puan (sunucuda user_badges'e 'bonus_share').
+// Davet: bağlantıdan/koddan katılan her arkadaş için iki tarafa 50 puan (sunucu yazar, invite_bonus).
+export const SHARE_POINTS = 25;
+export const INVITE_POINTS = 50;
+const SHARE_CLAIMED_KEY = 'share_points_v1';
+const INVITE_SEEN_KEY = 'invite_points_seen_v1';
+
+export type BonusMoment = { kind: 'share' | 'invite'; points: number; name?: string };
+let pendingBonus: BonusMoment | null = null;
+const bonusListeners = new Set<() => void>();
+export function showBonusMoment(m: BonusMoment): void {
+  pendingBonus = m;
+  bonusListeners.forEach((f) => {
+    try {
+      f();
+    } catch {}
+  });
+}
+export function takeBonusMoment(): BonusMoment | null {
+  const m = pendingBonus;
+  pendingBonus = null;
+  return m;
+}
+export function onBonusMoment(cb: () => void): () => void {
+  bonusListeners.add(cb);
+  return () => {
+    bonusListeners.delete(cb);
+  };
+}
+
+export async function shareBonusClaimed(): Promise<boolean> {
+  return !!(await AsyncStorage.getItem(SHARE_CLAIMED_KEY).catch(() => null));
+}
+
+// Paylaşım menüsü açıldıktan sonra çağrılır. İlk seferde puanı yazar ve kutlamayı sıraya koyar.
+export async function claimShareBonus(): Promise<boolean> {
+  try {
+    if (await AsyncStorage.getItem(SHARE_CLAIMED_KEY)) return false;
+    if (!(await ensureSession())) return false;
+    const { error } = await supabase
+      .from('user_badges')
+      .upsert([{ badge_id: 'bonus_share' }], { onConflict: 'user_id,badge_id', ignoreDuplicates: true });
+    if (error) return false;
+    await AsyncStorage.setItem(SHARE_CLAIMED_KEY, '1').catch(() => {});
+    pointsChanged();
+    showBonusMoment({ kind: 'share', points: SHARE_POINTS });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Davet eden taraf: son bakıştan beri davet puanı arttıysa bir kez kutla.
+export async function checkInviteBonus(): Promise<void> {
+  try {
+    const w = await fetchPredictionWeeks();
+    if (!w) return;
+    const now = w.byKind.invite;
+    const raw = await AsyncStorage.getItem(INVITE_SEEN_KEY).catch(() => null);
+    const seen = raw === null ? 0 : Number(raw) || 0;
+    if (now === seen) return;
+    await AsyncStorage.setItem(INVITE_SEEN_KEY, String(now)).catch(() => {});
+    if (now > seen) showBonusMoment({ kind: 'invite', points: now - seen });
+  } catch {}
+}
+
+// Katılan taraf: puan o an yazıldı, tekrar kutlanmasın diye görülen toplam da ilerletilir.
+export async function noteInviteBonusJoined(name: string): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(INVITE_SEEN_KEY).catch(() => null);
+    const seen = raw === null ? 0 : Number(raw) || 0;
+    await AsyncStorage.setItem(INVITE_SEEN_KEY, String(seen + INVITE_POINTS)).catch(() => {});
+  } catch {}
+  pointsChanged();
+  showBonusMoment({ kind: 'invite', points: INVITE_POINTS, name });
 }
 
 // ---------------------------------------------------------------- rozet puanları

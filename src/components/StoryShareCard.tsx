@@ -61,8 +61,8 @@ export const StoryShareCard = forwardRef<View, Props>(function StoryShareCard(
   const t = THEMES[theme];
   const tx = (lang as string) === 'tr' ? TEXT.tr : TEXT.en;
   // Rozet: lacivert ve krem kartta sarı, sarı kartta lacivert
-  const stickerBg = theme === 'amber' ? '#0F2A52' : '#FBBF24';
-  const stickerFg = theme === 'amber' ? '#FBBF24' : '#0F2A52';
+  const stickerBg = theme === 'amber' ? '#0F2A52' : '#F4B88A';
+  const stickerFg = theme === 'amber' ? '#F4B88A' : '#0F2A52';
   const stickerSub = theme === 'amber' ? '#FFFFFF' : '#0F2A52';
   const big = club ?? option;
   const bigSize = big.length > 18 ? 36 : big.length > 13 ? 42 : 46;
@@ -106,7 +106,7 @@ export const StoryShareCard = forwardRef<View, Props>(function StoryShareCard(
       </View>
 
       <View style={styles.clubBlock}>
-        <Text style={[styles.pre, { color: theme === 'navy' ? '#FBBF24' : t.accent }]}>
+        <Text style={[styles.pre, { color: theme === 'navy' ? '#F4B88A' : t.accent }]}>
           {club ? tx.officially : tx.picked}
         </Text>
         <Text style={[styles.club, { color: t.fg, fontSize: bigSize, lineHeight: bigSize * 1.04 }]} numberOfLines={2}>

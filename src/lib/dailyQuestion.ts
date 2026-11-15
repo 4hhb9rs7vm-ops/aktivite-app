@@ -38,8 +38,8 @@ export type DQResult = {
 
 // Kart temaları: uygulamanın kendi renkleri
 export const THEMES: Record<DQTheme, { bg: string; fg: string; soft: string; accent: string; line: string; chip: string }> = {
-  navy: { bg: '#0F2A52', fg: '#FFFFFF', soft: 'rgba(255,255,255,0.78)', accent: '#FBBF24', line: 'rgba(255,255,255,0.16)', chip: 'rgba(255,255,255,0.12)' },
-  amber: { bg: '#FBBF24', fg: '#0F2A52', soft: 'rgba(15,42,82,0.8)', accent: '#0F2A52', line: 'rgba(15,42,82,0.2)', chip: 'rgba(15,42,82,0.12)' },
+  navy: { bg: '#0F2A52', fg: '#FFFFFF', soft: 'rgba(255,255,255,0.78)', accent: '#F4B88A', line: 'rgba(255,255,255,0.16)', chip: 'rgba(255,255,255,0.12)' },
+  amber: { bg: '#F4B88A', fg: '#0F2A52', soft: 'rgba(15,42,82,0.8)', accent: '#0F2A52', line: 'rgba(15,42,82,0.2)', chip: 'rgba(15,42,82,0.12)' },
   cream: { bg: '#FFF3E4', fg: '#0F2A52', soft: 'rgba(15,42,82,0.8)', accent: '#B45309', line: 'rgba(15,42,82,0.15)', chip: 'rgba(15,42,82,0.08)' },
 };
 

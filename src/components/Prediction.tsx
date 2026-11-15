@@ -9,7 +9,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Circle, Defs, LinearGradient as SvgGradient, Rect, Stop, Svg } from 'react-native-svg';
-import { activityName, type Lang } from '@/lib/i18n';
+import { activityName, loadLang, type Lang } from '@/lib/i18n';
 import {
   fetchPredictionWeeks,
   hookBadgeSync,
@@ -24,6 +24,10 @@ import {
   syncBadges,
   claimWelcomePoints,
   WELCOME_POINTS,
+  checkInviteBonus,
+  onBonusMoment,
+  takeBonusMoment,
+  type BonusMoment,
 } from '@/lib/prediction';
 import { awardBadges, BADGES } from '@/lib/badges';
 import { istanbulToday } from '@/lib/dailyQuestion';
@@ -120,6 +124,8 @@ const KIND_TR: Record<string, string> = {
   guess_miss: 'Tahmine katıldın',
   badge: 'Rozet',
   welcome: 'Hoş geldin puanı',
+  share: 'İlk paylaşım',
+  invite: 'Arkadaşın katıldı',
 };
 const KIND_EN: Record<string, string> = {
   question: 'Question of the Day',
@@ -128,6 +134,8 @@ const KIND_EN: Record<string, string> = {
   guess_miss: 'Played the guess',
   badge: 'Badge',
   welcome: 'Welcome points',
+  share: 'First share',
+  invite: 'A friend joined',
 };
 const KIND_ICON: Record<string, { e: string; bg: string }> = {
   question: { e: '💬', bg: '#F1F0FD' },
@@ -137,6 +145,8 @@ const KIND_ICON: Record<string, { e: string; bg: string }> = {
   streak: { e: '🔥', bg: '#FDEEE2' },
   badge: { e: '🏅', bg: '#FDEEE2' },
   welcome: { e: '🎁', bg: '#FDEEE2' },
+  share: { e: '📣', bg: '#FDEEE2' },
+  invite: { e: '🤝', bg: '#E8EBFE' },
 };
 
 function itemTitle(it: PointsItem, lang: Lang): string {
@@ -164,6 +174,8 @@ function itemSub(it: PointsItem, lang: Lang): string | null {
   if (it.kind === 'streak') return T ? 'Seri bonusu' : 'Streak bonus';
   if (it.kind === 'badge') return T ? 'Rozet puanı' : 'Badge points';
   if (it.kind === 'welcome') return T ? 'Hoş geldin hediyesi' : 'Welcome gift';
+  if (it.kind === 'share') return T ? 'Bir kereye özel' : 'One time only';
+  if (it.kind === 'invite') return it.info ? (T ? `${it.info} bağlantınla geldi` : `${it.info} came through your link`) : T ? 'Davet puanı' : 'Invite points';
   return null;
 }
 
@@ -264,6 +276,8 @@ export function PredictionSheet({
     { k: 'badge', label: T ? 'Rozetler' : 'Badges', color: PEACH, v: data.byKind.badge },
     { k: 'streak', label: T ? 'Seri' : 'Streaks', color: '#F8D7BE', v: data.byKind.streak },
     { k: 'welcome', label: T ? 'Hoş geldin' : 'Welcome', color: '#C7CBF7', v: data.byKind.welcome },
+    { k: 'invite', label: T ? 'Davet' : 'Invites', color: '#5B8DEF', v: data.byKind.invite },
+    { k: 'share', label: T ? 'Paylaşım' : 'Sharing', color: '#E9A27A', v: data.byKind.share },
   ].filter((x) => x.v > 0);
 
   // Geçmiş: güne göre grupla
@@ -825,6 +839,99 @@ export function WelcomePointsHost({ lang, streak }: { lang: Lang; streak?: Local
 
 // ======================================================================== pazartesi sonucu
 const SHOW_DELAY_MS = 6500; // günün sorusu ve kampüs penceresinden sonra
+
+// ======================================================================== paylaşım / davet puanı kutlaması (1.5.7)
+// Kök düzeyde durur (_layout): ilk paylaşım (+25) ve bağlantıdan katılan arkadaş (+50) için kısa kutlama.
+export function BonusMomentHost() {
+  const [moment, setMoment] = useState<BonusMoment | null>(null);
+  const [lang, setLang] = useState<Lang>('tr');
+  const anim = useRef(new Animated.Value(0)).current;
+  const T = tr(lang);
+
+  useEffect(() => {
+    setOverlayBusy('bonus_moment', !!moment);
+    return () => setOverlayBusy('bonus_moment', false);
+  }, [moment]);
+
+  useEffect(() => {
+    let cancelWait = () => {};
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const tryShow = () => {
+      if (timer) clearTimeout(timer);
+      // Paylaşım menüsü kapanana kadar kısa bir pay bırak
+      timer = setTimeout(() => {
+        cancelWait();
+        cancelWait = whenOverlayFree(() => {
+          const m = takeBonusMoment();
+          if (!m) return;
+          loadLang()
+            .then((l) => setLang((l ?? 'tr') as Lang))
+            .catch(() => {});
+          noteCelebration();
+          track('points_moment', { kind: m.kind, day: 0 });
+          anim.setValue(0);
+          setMoment(m);
+          Animated.spring(anim, { toValue: 1, friction: 7, tension: 80, useNativeDriver: true }).start();
+          setTimeout(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}), 150);
+        }, 'bonus_moment');
+      }, 1200);
+    };
+    const off = onBonusMoment(tryShow);
+    // Davet eden taraf: açılışta ve geri dönüşte yeni davet puanı var mı
+    const first = setTimeout(() => checkInviteBonus().catch(() => {}), 4000);
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') setTimeout(() => checkInviteBonus().catch(() => {}), 4000);
+    });
+    return () => {
+      off();
+      sub.remove();
+      clearTimeout(first);
+      if (timer) clearTimeout(timer);
+      cancelWait();
+    };
+  }, [anim]);
+
+  if (!moment) return null;
+  const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] });
+  const share = moment.kind === 'share';
+  const title = share
+    ? T
+      ? 'İlk paylaşımın için'
+      : 'For your first share'
+    : moment.name
+      ? T
+        ? `${moment.name} ile arkadaş oldunuz`
+        : `You and ${moment.name} are friends`
+      : T
+        ? 'Bağlantınla bir arkadaşın katıldı'
+        : 'A friend joined through your link';
+  const body = share
+    ? T
+      ? 'Bağlantından katılan her arkadaş için ikiniz de 50 puan kazanırsınız.'
+      : 'For every friend who joins through your link, you both get 50 points.'
+    : T
+      ? 'Davet puanı ikinize de yazıldı. Yeni arkadaş, yeni puan.'
+      : 'Invite points went to both of you. New friend, new points.';
+  return (
+    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={() => setMoment(null)}>
+      <View style={styles.momentBackdrop}>
+        <Animated.View style={[styles.momentCard, { opacity: anim, transform: [{ scale }] }]}>
+          <Text style={styles.momentEmoji}>{share ? '📣' : '🤝'}</Text>
+          <Text style={styles.momentTitle}>{title}</Text>
+          <Text style={styles.momentBig}>{T ? `+${moment.points} puan` : `+${moment.points} points`}</Text>
+          <Text style={styles.momentBody}>{body}</Text>
+          <Pressable
+            style={({ pressed }) => [styles.momentBtn, pressed && { opacity: 0.85 }]}
+            onPress={() => setMoment(null)}
+            accessibilityRole="button"
+          >
+            <Text style={styles.momentBtnText}>{T ? 'Harika!' : 'Nice!'}</Text>
+          </Pressable>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
 
 export function PredictionWeeklyHost({ lang }: { lang: Lang }) {
   const insets = useSafeAreaInsets();

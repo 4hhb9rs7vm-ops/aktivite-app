@@ -44,7 +44,7 @@ import { track } from '@/lib/analytics';
 import { checkBadges } from '@/lib/badges';
 
 const NAVY = '#0F2A52';
-const AMBER = '#FBBF24';
+const AMBER = '#F4B88A'; // 1.5.6: sarı yerine şeftali
 const AMBER_BG = '#FFF3E4';
 const AMBER_FG = '#B45309';
 const INK = '#16161a';

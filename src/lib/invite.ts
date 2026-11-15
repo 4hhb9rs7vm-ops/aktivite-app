@@ -10,6 +10,7 @@ import { ensureSession, supabase } from '@/lib/supabase';
 import { track } from '@/lib/analytics';
 import { requestNotificationPermission } from '@/lib/notifications';
 import { registerPushToken } from '@/lib/ask';
+import { noteInviteBonusJoined } from '@/lib/prediction';
 
 // Davet sayfası (web). Alan adı gelince sadece bu satır değişir.
 export const INVITE_PAGE = 'https://4hhb9rs7vm-ops.github.io/aktivite-app/d/';
@@ -55,6 +56,16 @@ export function isValidCode(code: string): boolean {
 export function inviteUrl(code: string, name?: string): string {
   const n = name ? `&n=${encodeURIComponent(name.slice(0, 24))}` : '';
   return `${INVITE_PAGE}?c=${code}${n}`;
+}
+
+// 1.5.7: an paylaşımı mesajı. Bağlantı metnin içinde gider; elle yapıştırmak gerekmez.
+export function momentMessage(activity: string, pct: string | null, url: string, lang: 'tr' | 'en' | string): string {
+  if (lang === 'tr') {
+    const line = pct ? `Şu An'da insanların ${pct} kadarı benimle aynı şeyi yapıyor.` : `Şu An'da kaç kişi benimle aynı şeyi yapıyor, bak.`;
+    return `Şu an: ${activity} 👀\n${line} Sen ne yapıyorsun?\n${url}`;
+  }
+  const line = pct ? `${pct} of people on Şu An are doing the same thing.` : `See how many people on Şu An are doing the same thing.`;
+  return `Right now: ${activity} 👀\n${line} What about you?\n${url}`;
 }
 
 export function inviteMessage(code: string, name: string | undefined, lang: 'tr' | 'en' | string): string {
@@ -133,6 +144,8 @@ export async function requestInvite(rawCode: string): Promise<RequestInviteResul
         .catch(() => {});
     }
     if (data.friend_id) await markFriendsSeen([data.friend_id]);
+    // 1.5.7: bağlantıdan katılana ve davet edene 50'şer puan (sunucu yazdıysa)
+    if (data.bonus === true) noteInviteBonusJoined(data.name || '').catch(() => {});
     return { ok: true, name: data.name || '', friendId: data.friend_id || '' };
   } catch {
     return { ok: false, error: 'network' };

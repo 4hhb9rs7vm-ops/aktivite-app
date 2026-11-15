@@ -68,7 +68,7 @@ const SOFT = '#4A4E5A';
 const MUTED = '#6B6F7B';
 const ACCENT = '#3F3BC9';
 const ACCENT_BG = '#EEF0FF';
-const AMBER = '#FBBF24';
+const AMBER = '#F4B88A'; // 1.5.6: sarı yerine şeftali
 const LAVENDER = '#A5B4FC';
 const WA = '#25D366';
 

@@ -126,6 +126,7 @@ const KIND_TR: Record<string, string> = {
   welcome: 'Hoş geldin puanı',
   share: 'İlk paylaşım',
   invite: 'Arkadaşın katıldı',
+  profile: 'Yaşını ekledin',
 };
 const KIND_EN: Record<string, string> = {
   question: 'Question of the Day',
@@ -136,6 +137,7 @@ const KIND_EN: Record<string, string> = {
   welcome: 'Welcome points',
   share: 'First share',
   invite: 'A friend joined',
+  profile: 'Added your age',
 };
 const KIND_ICON: Record<string, { e: string; bg: string }> = {
   question: { e: '💬', bg: '#F1F0FD' },
@@ -147,6 +149,7 @@ const KIND_ICON: Record<string, { e: string; bg: string }> = {
   welcome: { e: '🎁', bg: '#FDEEE2' },
   share: { e: '📣', bg: '#FDEEE2' },
   invite: { e: '🤝', bg: '#E8EBFE' },
+  profile: { e: '🎂', bg: '#FDEEE2' },
 };
 
 function itemTitle(it: PointsItem, lang: Lang): string {
@@ -174,7 +177,7 @@ function itemSub(it: PointsItem, lang: Lang): string | null {
   if (it.kind === 'streak') return T ? 'Seri bonusu' : 'Streak bonus';
   if (it.kind === 'badge') return T ? 'Rozet puanı' : 'Badge points';
   if (it.kind === 'welcome') return T ? 'Hoş geldin hediyesi' : 'Welcome gift';
-  if (it.kind === 'share') return T ? 'Bir kereye özel' : 'One time only';
+  if (it.kind === 'share' || it.kind === 'profile') return T ? 'Bir kereye özel' : 'One time only';
   if (it.kind === 'invite') return it.info ? (T ? `${it.info} bağlantınla geldi` : `${it.info} came through your link`) : T ? 'Davet puanı' : 'Invite points';
   return null;
 }
@@ -277,7 +280,7 @@ export function PredictionSheet({
     { k: 'streak', label: T ? 'Seri' : 'Streaks', color: '#F8D7BE', v: data.byKind.streak },
     { k: 'welcome', label: T ? 'Hoş geldin' : 'Welcome', color: '#C7CBF7', v: data.byKind.welcome },
     { k: 'invite', label: T ? 'Davet' : 'Invites', color: '#5B8DEF', v: data.byKind.invite },
-    { k: 'share', label: T ? 'Paylaşım' : 'Sharing', color: '#E9A27A', v: data.byKind.share },
+    { k: 'share', label: T ? 'Paylaşım' : 'Sharing', color: '#E9A27A', v: data.byKind.share + data.byKind.profile },
   ].filter((x) => x.v > 0);
 
   // Geçmiş: güne göre grupla

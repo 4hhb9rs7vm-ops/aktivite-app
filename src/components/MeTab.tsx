@@ -31,8 +31,11 @@ import {
   nameError,
   nameInitial,
   nameLength,
-  OCCUPATIONS,
-  occupationLabel,
+  SEGMENTS,
+  segmentLabel,
+  segmentOf,
+  withSegment,
+  type Segment,
   STUDENT,
 } from '@/lib/me';
 import { TERMS_URLS } from '@/lib/friends';
@@ -65,7 +68,7 @@ const T = {
     title: 'Ben',
     privacyTitle: 'Gizliliğin',
     privacyNote:
-      'Görünen adın ve mesleğin sadece telefonunda tutulur. Yaş, şehir, ülke, cinsiyet ve üniversite ise yalnızca onay verirsen, oranları hesaplamak için anonim olarak kullanılır.',
+      'Görünen adını yalnızca arkadaşların görür. Durum, yaş, şehir, ülke, cinsiyet ve üniversite ise yalnızca onay verirsen, oranları hesaplamak için anonim olarak kullanılır.',
     nameHint: 'Görünen adın. Sadece arkadaşların görür.',
     namePlaceholder: 'Görünen ad seç',
     nameEmptyHint: 'Arkadaşlarına görünecek adı sen seçersin.',
@@ -75,15 +78,15 @@ const T = {
     nameInput: 'Örn. Ayşe ya da Kahve 🐱',
     save: 'Kaydet',
     cancel: 'Vazgeç',
-    occupation: 'Meslek',
+    occupation: 'Durum',
     university: 'Üniversite',
     country: 'Ülke',
     city: 'Şehir',
     age: 'Yaş aralığı',
     gender: 'Cinsiyet',
     choose: 'Seç',
-    pickOccupation: 'Mesleğini seç',
-    occupationNote: 'Sadece telefonunda kalır, sunucuya gönderilmez.',
+    pickOccupation: 'Durumunu seç',
+    occupationNote: 'Onay verirsen yalnızca toplamlarda, anonim olarak kullanılır.',
     pickUniversity: 'Üniversiteni seç',
     searchUniversity: 'Üniversite ara (ör. ODTÜ, Boğaziçi)',
     universityNote: 'Onay verirsen kampüs karşılaştırması için anonim olarak kullanılır.',
@@ -134,7 +137,7 @@ const T = {
     title: 'Me',
     privacyTitle: 'Your privacy',
     privacyNote:
-      'Your display name and occupation stay on your phone only. Age, city, country, gender and university are used anonymously to calculate the percentages, and only if you agree.',
+      'Only your friends see your display name. Status, age, city, country, gender and university are used anonymously to calculate the percentages, and only if you agree.',
     nameHint: 'Your display name. Only your friends see it.',
     namePlaceholder: 'Choose a display name',
     nameEmptyHint: 'You choose the name your friends will see.',
@@ -144,15 +147,15 @@ const T = {
     nameInput: 'e.g. Alex or Coffee 🐱',
     save: 'Save',
     cancel: 'Cancel',
-    occupation: 'Occupation',
+    occupation: 'Status',
     university: 'University',
     country: 'Country',
     city: 'City',
     age: 'Age range',
     gender: 'Gender',
     choose: 'Choose',
-    pickOccupation: 'Choose your occupation',
-    occupationNote: 'Stays on your phone only, never sent to our server.',
+    pickOccupation: 'Choose your status',
+    occupationNote: 'Used anonymously, in totals only, and only if you agree.',
     pickUniversity: 'Choose your university',
     searchUniversity: 'Search university (e.g. METU, Boğaziçi)',
     universityNote: 'Used anonymously for campus comparison, only if you agree.',
@@ -263,14 +266,14 @@ export function MeTab({
     return v === UNIVERSITY_OTHER ? t.universityOther : v;
   }
 
+  // 1.5.8: meslek listesi yerine durum (öğrenci / çalışan / her ikisi / evde)
   function pickOccupation(v: string | null) {
-    const next: Me = { ...me, occupation: v ?? undefined };
-    // Öğrenci değilse üniversite bilgisi tutulmaz
-    if (v !== STUDENT) delete next.university;
+    const next: Me = withSegment(me, (v as Segment | null) ?? null);
+    // Öğrenci değilse üniversite bilgisi tutulmaz (withSegment siler)
     onMeChange(next);
     setPicker(null);
-    // "Öğrenci" seçilince üniversite seçimi hemen açılsın
-    if (v === STUDENT && !me.university) setTimeout(() => setSchoolOpen(true), 350);
+    // "Öğrenci" ya da "Her ikisi" seçilince üniversite seçimi hemen açılsın
+    if (next.occupation === STUDENT && !me.university) setTimeout(() => setSchoolOpen(true), 350);
   }
 
   // ---- Seçici içerikleri ----
@@ -294,10 +297,10 @@ export function MeTab({
     sheet = {
       title: t.pickOccupation,
       note: t.occupationNote,
-      selected: me.occupation,
-      getOptions: () => OCCUPATIONS.map((o) => ({ value: o.id, label: o[lang] })),
+      selected: segmentOf(me) ?? undefined,
+      getOptions: () => SEGMENTS.map((o) => ({ value: o.id, label: `${o.emoji}  ${lang === 'tr' ? o.tr : o.en}` })),
       onPick: (v) => pickOccupation(v),
-      onClear: me.occupation ? () => pickOccupation(null) : undefined,
+      onClear: segmentOf(me) ? () => pickOccupation(null) : undefined,
     };
   } else if (picker === 'university') {
     sheet = {
@@ -400,7 +403,7 @@ export function MeTab({
   };
 
   const rows: { id: PickerId; icon: keyof typeof Ionicons.glyphMap; label: string; value: string }[] = [
-    { id: 'occupation', icon: 'briefcase-outline', label: t.occupation, value: occupationLabel(me.occupation, lang) },
+    { id: 'occupation', icon: 'briefcase-outline', label: t.occupation, value: segmentLabel(segmentOf(me), lang) },
     ...(isStudent
       ? [{ id: 'university' as const, icon: 'school-outline' as const, label: t.university, value: universityLabel(me.university) }]
       : []),

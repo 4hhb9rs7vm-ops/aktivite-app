@@ -36,6 +36,8 @@ import {
   THEMES,
   nextHint,
   themeOf,
+  fetchGroupLine,
+  type GroupLine,
 } from '@/lib/dailyQuestion';
 import { StoryShareCard, STORY_H, STORY_W } from '@/components/StoryShareCard';
 import { track } from '@/lib/analytics';
@@ -128,6 +130,33 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
   const tx = (lang as string) === 'tr' ? TEXT.tr : TEXT.en;
   const { question, myKey, result, isYesterday } = data;
   const hint = nextHint(question, lang);
+  // 1.5.8: "senin grubun ne dedi" satırı (grupta en az 10 cevap varsa)
+  const [group, setGroup] = useState<GroupLine | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetchGroupLine(question)
+      .then((g) => {
+        if (alive) setGroup(g);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [question]);
+  const groupOption = group ? question.options.find((o) => o.key === group.optionKey) : null;
+  const groupKicker = !group
+    ? ''
+    : (lang as string) === 'tr'
+      ? group.segment === 'student'
+        ? 'ÖĞRENCİLER NE DEDİ?'
+        : group.segment === 'worker'
+          ? 'ÇALIŞANLAR NE DEDİ?'
+          : 'EVDE OLANLAR NE DEDİ?'
+      : group.segment === 'student'
+        ? 'WHAT DID STUDENTS SAY?'
+        : group.segment === 'worker'
+          ? 'WHAT DID WORKERS SAY?'
+          : 'WHAT DID PEOPLE AT HOME SAY?';
   const theme = themeOf(question);
   const t = THEMES[theme];
 
@@ -409,6 +438,16 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
                   </Animated.View>
                 ) : null}
 
+                {group && groupOption ? (
+                  <Animated.View style={[styles.hintCard, { opacity: verdictAnim }]}>
+                    <Text style={styles.groupPct}>%{group.pct}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.hintKicker}>{groupKicker}</Text>
+                      <Text style={styles.hintText}>“{optionLabel(groupOption, lang)}”</Text>
+                    </View>
+                  </Animated.View>
+                ) : null}
+
                 {/* 1.5.6: yarının sorusundan ipucu (yalnızca bugünün sonucunda; soru açık edilmez) */}
                 {hint && !isYesterday ? (
                   <Animated.View style={[styles.hintCard, { opacity: verdictAnim }]}>
@@ -504,6 +543,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.09)',
   },
   hintEmoji: { fontSize: 26 },
+  groupPct: { fontFamily: F.bold, fontSize: 22, color: AMBER },
   hintKicker: { fontFamily: F.bold, fontSize: 10.5, letterSpacing: 1, color: '#A5B4FC' },
   hintText: { fontFamily: F.bold, fontSize: 15.5, lineHeight: 21, color: '#ffffff', marginTop: 2 },
   predCardHit: { backgroundColor: 'rgba(79,70,229,0.55)', borderColor: '#A5B4FC' },

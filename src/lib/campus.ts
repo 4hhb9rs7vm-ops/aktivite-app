@@ -10,7 +10,7 @@ import { track } from '@/lib/analytics';
 import { istanbulToday } from '@/lib/dailyQuestion';
 import { getNotifications, hasNotificationPermission } from '@/lib/notifications';
 import { loadLang } from '@/lib/i18n';
-import { loadMe, Me, notifyProfileChanged, saveMe, STUDENT } from '@/lib/me';
+import { isStudentSegment, loadMe, Me, notifyProfileChanged, saveMe, Segment, STUDENT, withSegment } from '@/lib/me';
 import { UNIVERSITY_OTHER } from '@/lib/universities';
 
 export const LEAGUE_MIN = 10; // sunucudaki eşikle aynı (get_campus_status)
@@ -150,8 +150,20 @@ export async function answerStudent(answer: 'yes' | 'no'): Promise<void> {
   // 1.5.3: "Evet" diyenin mesleği hemen Öğrenci olur; okul seçmeden çıksa bile kalır
   if (answer === 'yes') {
     const me = await loadMe();
-    if (me.occupation !== STUDENT) await saveMe({ ...me, occupation: STUDENT });
+    if (me.occupation !== STUDENT || !isStudentSegment(me.segment ?? null)) {
+      await saveMe({ ...me, occupation: STUDENT, segment: me.segment === 'both' ? 'both' : 'student' });
+    }
   }
+}
+
+// 1.5.8: Hoş geldin ekranındaki durum sorusu (öğrenci / çalışan / her ikisi / evde).
+// Öğrenci sorusunun yerini aldı; aynı anahtarı ve aynı ölçüm olayını kullanır.
+export async function answerSegment(seg: Segment): Promise<void> {
+  const student = isStudentSegment(seg);
+  await AsyncStorage.setItem(STUDENT_KEY, student ? 'yes' : 'no').catch(() => {});
+  track('student_prompt', { answer: seg });
+  const me = await loadMe();
+  await saveMe(withSegment(me, seg));
 }
 
 // 1.5.3: "Evet" deyip okul seçmeden çıkana bir sonraki açılışta bir kez daha (soru sormadan) okul seçimi açılır
@@ -170,7 +182,7 @@ export async function markReasked(): Promise<void> {
 export async function saveSchool(university: string, giveConsent: boolean): Promise<void> {
   const me = await loadMe();
   if (giveConsent) await AsyncStorage.setItem('consent', 'yes').catch(() => {});
-  await saveMe({ ...me, occupation: STUDENT, university }); // saveMe değişikliği haber verir
+  await saveMe({ ...me, occupation: STUDENT, segment: me.segment === 'both' ? 'both' : 'student', university }); // saveMe değişikliği haber verir
   if (university !== UNIVERSITY_OTHER) {
     await AsyncStorage.setItem(
       CAMPUS_KEY,

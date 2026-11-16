@@ -103,16 +103,31 @@ import {
   getNotifications,
   getTodayMoment,
   hasNotificationPermission,
+  cancelResultNotifications,
   isDailyMomentEnabled,
   requestNotificationPermission,
   scheduleDailyMoments,
   setDailyMomentEnabled,
 } from '@/lib/notifications';
-import { FRIENDS_TAB_ENABLED, loadMe, Me, ME_KEY, onProfileChanged, saveMe, STUDENT } from '@/lib/me';
+import {
+  FRIENDS_TAB_ENABLED,
+  isStudentSegment,
+  loadMe,
+  Me,
+  ME_KEY,
+  onProfileChanged,
+  saveMe,
+  segmentOf,
+  SEGMENTS,
+  STUDENT,
+  type Segment,
+} from '@/lib/me';
+import { ResultExtraCard } from '@/components/SubCards';
 import * as Clipboard from 'expo-clipboard';
 import { createInvite, getMyInvites, inviteUrl, momentMessage } from '@/lib/invite';
 import { InviteAskHost } from '@/components/InviteAsk';
-import { answerStudent, cancelLeagueNotification, markHomeReturn } from '@/lib/campus';
+import { serverResultPushOn } from '@/lib/flags';
+import { answerSegment, cancelLeagueNotification, markHomeReturn } from '@/lib/campus';
 import { CampusSchoolPicker } from '@/components/CampusLeague';
 import { initFirstRun, resetFirstRun } from '@/lib/firstRun';
 import { PointsMomentHost, PredictionChip, PredictionWeeklyHost, WelcomePointsHost } from '@/components/Prediction';
@@ -2114,89 +2129,106 @@ const hs = StyleSheet.create({
 });
 
 // ---- 1.3.0 (9): Hoş geldin kartı ----
+// 1.5.8: Hoş geldin kartı durumu sorar (öğrenci / çalışan / her ikisi / evde). Seçince altında
+// isteğe bağlı yaş ve cinsiyet açılır; hepsi profile yazılır. Öğrenciye ardından okul seçimi açılır.
+type WelcomeChoice = { segment: Segment | null; age?: string; gender?: string };
 function WelcomeSheet({
   visible,
   lang,
-  onStart,
-  onInvite,
-  onStudent,
+  onDone,
 }: {
   visible: boolean;
   lang: Lang;
-  onStart: () => void;
-  onInvite: () => void;
-  onStudent: (answer: 'yes' | 'no') => void;
+  onDone: (choice: WelcomeChoice) => void;
 }) {
   const tr = lang === 'tr';
-  // 1.5.4 (26): Öğrenci sorusu hoş geldin kartının içinde (ilk girişte, ayrı pencere açmadan). Sadece Türkçe.
-  const askStudent = tr;
-  const [studentNo, setStudentNo] = useState(false);
+  const [segment, setSegment] = useState<Segment | null>(null);
+  const [age, setAge] = useState<string | undefined>(undefined);
+  const [gender, setGender] = useState<string | undefined>(undefined);
+  const skip = () => onDone({ segment: null });
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onStart} statusBarTranslucent>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={skip} statusBarTranslucent>
       <View style={ws.backdrop}>
         <View style={ws.sheet}>
           <View style={ws.handle} />
-          <Text style={ws.emoji}>🎉</Text>
-          <Text style={ws.title}>
-            {tr ? 'Hoş geldin,' : 'Welcome,'}
-            {'\n'}
-            <Text style={ws.titleAccent}>{tr ? 'ilk gelenlerdensin.' : "you're one of the first."}</Text>
-          </Text>
-          <Text style={ws.body}>
-            {tr
-              ? 'Oranlar, bir anda yeterli kişi toplanınca açılır. İlk günlerde bazı ekranlar boş görünebilir; birlikte dolduracağız.'
-              : "Rates unlock once enough people are here at the same moment. Some screens may look empty in the first days; we'll fill them together."}
-          </Text>
-          <View style={ws.row}>
-            <View style={ws.rowIcon}>
-              <Text style={ws.rowEmoji}>✨</Text>
-            </View>
-            <Text style={ws.rowText}>
-              {tr ? 'Her seçim, oranların açılmasına bir adım daha.' : 'Every pick brings the rates one step closer.'}
+          <ScrollView showsVerticalScrollIndicator={false} bounces={false} keyboardShouldPersistTaps="handled">
+            <Text style={ws.title}>
+              {tr ? 'Hoş geldin.' : 'Welcome.'} <Text style={ws.titleAccent}>{tr ? 'Seni tanıyalım.' : "Let's get to know you."}</Text>
             </Text>
-          </View>
-          <View style={ws.row}>
-            <View style={ws.rowIcon}>
-              <Text style={ws.rowEmoji}>🔒</Text>
-            </View>
-            <Text style={ws.rowText}>
-              {tr ? 'Oranlarda kim olduğun değil, sadece toplamlar görünür.' : 'Rates show totals only, never who you are.'}
+            <Text style={ws.body}>
+              {tr
+                ? 'Tek dokunuş. Seni kendin gibilerle karşılaştırabilelim diye.'
+                : 'One tap, so we can compare you with people like you.'}
             </Text>
-          </View>
-          {askStudent ? (
-            <View style={ws.studentBox}>
-              <Text style={ws.studentQ}>🎓 Üniversite öğrencisi misin?</Text>
-              <Text style={ws.studentSub}>Okulunu seçersen Kampüs Ligi’nde okulun için sayılırsın.</Text>
-              <View style={ws.studentRow}>
-                <Pressable
-                  style={({ pressed }) => [ws.studentBtn, ws.studentYes, pressed && { opacity: 0.85 }]}
-                  onPress={() => onStudent('yes')}
-                  accessibilityRole="button"
-                >
-                  <Text style={ws.studentYesText}>Evet, öğrenciyim</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [ws.studentBtn, studentNo && ws.studentNoOn, pressed && { opacity: 0.85 }]}
-                  onPress={() => {
-                    setStudentNo(true);
-                    onStudent('no');
-                  }}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: studentNo }}
-                >
-                  <Text style={[ws.studentNoText, studentNo && { color: VIOLET }]}>{studentNo ? 'Hayır ✓' : 'Hayır'}</Text>
-                </Pressable>
+            <View style={ws.segGrid}>
+              {SEGMENTS.map((o) => {
+                const on = segment === o.id;
+                return (
+                  <Pressable
+                    key={o.id}
+                    style={({ pressed }) => [ws.segBtn, on && ws.segBtnOn, pressed && { opacity: 0.85 }]}
+                    onPress={() => {
+                      Haptics.selectionAsync().catch(() => {});
+                      setSegment(o.id);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
+                  >
+                    <Text style={ws.segEmoji}>{o.emoji}</Text>
+                    <Text style={[ws.segText, on && { color: VIOLET }]}>{tr ? o.tr : o.en}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {segment ? (
+              <View style={ws.profileBox}>
+                <Text style={ws.profileKicker}>{tr ? 'İSTERSEN · YAŞ ARALIĞIN' : 'OPTIONAL · YOUR AGE RANGE'}</Text>
+                <View style={ws.chipRow}>
+                  {AGE_RANGES.map((a) => (
+                    <Pressable
+                      key={a}
+                      style={[ws.chip, age === a && ws.chipOn]}
+                      onPress={() => setAge(age === a ? undefined : a)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: age === a }}
+                    >
+                      <Text style={[ws.chipText, age === a && ws.chipTextOn]}>{a}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <Text style={[ws.profileKicker, { marginTop: SP.md }]}>{tr ? 'İSTERSEN · CİNSİYET' : 'OPTIONAL · GENDER'}</Text>
+                <View style={ws.chipRow}>
+                  {GENDER_VALUES.map((g) => (
+                    <Pressable
+                      key={g}
+                      style={[ws.chip, gender === g && ws.chipOn]}
+                      onPress={() => setGender(gender === g ? undefined : g)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: gender === g }}
+                    >
+                      <Text style={[ws.chipText, gender === g && ws.chipTextOn]}>{genderLabel(g, lang)}</Text>
+                    </Pressable>
+                  ))}
+                </View>
               </View>
-            </View>
-          ) : null}
-          <Pressable style={ws.primary} onPress={onStart} accessibilityRole="button">
+            ) : null}
+            <Text style={ws.privacy}>
+              {tr
+                ? '🔒 Yalnızca toplamlarda, anonim olarak kullanılır. Kim olduğun görünmez; Ben sekmesinden değiştirebilirsin.'
+                : '🔒 Used anonymously, in totals only. Nobody sees who you are; you can change it in the Me tab.'}
+            </Text>
+          </ScrollView>
+          <Pressable
+            style={[ws.primary, !segment && { opacity: 0.45 }]}
+            onPress={() => segment && onDone({ segment, age, gender })}
+            disabled={!segment}
+            accessibilityRole="button"
+          >
             <Text style={ws.primaryText}>{tr ? 'Başlayalım' : "Let's go"}</Text>
           </Pressable>
-          {askStudent ? null : (
-            <Pressable style={ws.secondary} onPress={onInvite} accessibilityRole="button">
-              <Text style={ws.secondaryText}>{tr ? 'Arkadaşını davet et' : 'Invite a friend'}</Text>
-            </Pressable>
-          )}
+          <Pressable style={ws.skip} onPress={skip} hitSlop={8} accessibilityRole="button">
+            <Text style={ws.skipText}>{tr ? 'Şimdilik geç' : 'Skip for now'}</Text>
+          </Pressable>
         </View>
       </View>
     </Modal>
@@ -2479,6 +2511,34 @@ export default function HomeScreen() {
     });
   }, [selected, filter, profile, campus, consent, refreshKey]);
 
+  // 1.5.8: hangi filtrelerde şu an oran gösterilebiliyor? (yeterli kişi yoksa düğme hiç çıkmaz)
+  const [filterEnough, setFilterEnough] = useState<Partial<Record<FilterId, boolean>>>({});
+  const selectedId = selected?.id ?? null;
+  useEffect(() => {
+    if (!selectedId || !consent) {
+      setFilterEnough({});
+      return;
+    }
+    let alive = true;
+    const scopes = (['city', 'age', 'gender', 'campus'] as FilterId[]).filter((id) => !!fullProfile[id as keyof Profile]);
+    setFilterEnough({});
+    Promise.all(
+      scopes.map((id) =>
+        fetchRatio(selectedId, id, fullProfile[id as keyof Profile] ?? null)
+          .then((r) => [id, !!r?.enough] as const)
+          .catch(() => [id, false] as const)
+      )
+    ).then((pairs) => {
+      if (!alive) return;
+      const next: Partial<Record<FilterId, boolean>> = {};
+      for (const [id, ok] of pairs) next[id] = ok;
+      setFilterEnough(next);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [selectedId, profile, campus, consent]);
+
   // İlk kez bir sonuç görüldüğünde filtrelere dikkat çek (cihaz başına bir kez)
   useEffect(() => {
     if (!selected || filter !== 'world' || loading || ratioError || ratio === null) return;
@@ -2679,15 +2739,25 @@ export default function HomeScreen() {
     setWelcomeOpen(false);
   }
 
-  // 1.5.4 (26): Hoş geldin kartındaki öğrenci sorusu
-  function studentFromWelcome(answer: 'yes' | 'no') {
+  // 1.5.8: Hoş geldin kartı kapandı. Durum, yaş ve cinsiyet profile yazılır; öğrenciye okul seçimi açılır.
+  function finishWelcome(choice: WelcomeChoice) {
     tap();
-    answerStudent(answer).catch(() => {});
-    if (answer === 'yes') {
+    if (choice.segment) {
+      answerSegment(choice.segment).catch(() => {});
+      // Seçim, kartta yazan koşulla yapıldı: yalnızca toplamlarda, anonim kullanım
+      AsyncStorage.setItem('consent', 'yes').catch(() => {});
+      setConsent(true);
+      if (choice.age || choice.gender) {
+        const next: Profile = { ...profile };
+        if (choice.age) next.age = choice.age;
+        if (choice.gender) next.gender = choice.gender;
+        setProfile(next);
+        AsyncStorage.setItem('profile', JSON.stringify(next)).catch(() => {});
+      }
       // Önce okul seçimini aç, sonra kartı kapat (arada pencere boşluğu olmasın diye bekleme yeri tutulur)
-      setWelcomeSchoolOpen(true);
-      setWelcomeOpen(false);
+      if (isStudentSegment(choice.segment)) setWelcomeSchoolOpen(true);
     }
+    setWelcomeOpen(false);
   }
 
   function inviteFromWelcome() {
@@ -2788,6 +2858,10 @@ export default function HomeScreen() {
     // 1.5.6: eski sürümde kurulmuş "yeni an" / "kilit bitti" hatırlatmaları varsa iptal et
     cancelMomentEndNotification().catch(() => {});
     cancelLockEndNotification().catch(() => {});
+    // 1.5.8: sonuç bildirimini sunucu gönderiyorsa, eski sürümde kurulmuş yerel 21:00 bildirimini temizle (çift bildirim)
+    serverResultPushOn()
+      .then((on) => (on ? cancelResultNotifications() : undefined))
+      .catch(() => {});
   }, []);
 
   // 1.5.6: Günün Sorusu sonucu kapatılınca "peki şu an ne yapıyorsun?" satırı (an seçilince kalkar)
@@ -3012,7 +3086,10 @@ export default function HomeScreen() {
     AsyncStorage.setItem(NOTIF_ASKED_KEY, 'yes').catch(() => {});
     requestNotificationPermission()
       .then((ok) => {
-        if (ok) scheduleDailyMoments().catch(() => {});
+        if (!ok) return;
+        scheduleDailyMoments().catch(() => {});
+        // 1.5.8: bildirim kaydı hemen yapılsın; yoksa bu akşamki sonuç bildirimi bir sonraki açılışa kalıyordu
+        registerPushToken(true).catch(() => {});
       })
       .catch(() => {});
   }
@@ -3099,6 +3176,18 @@ export default function HomeScreen() {
     setConsent(true);
     AsyncStorage.setItem('consent', 'yes');
     if (selected) pushPresence(selected.id, fullProfile, true).then(() => setRefreshKey((k) => k + 1));
+  }
+
+  // 1.5.8: sonuç ekranındaki karttan yaş / durum girildi (kartta yazan koşulla: anonim, yalnızca toplamlarda)
+  function ageFromCard(age: string) {
+    AsyncStorage.setItem('consent', 'yes').catch(() => {});
+    setConsent(true);
+    saveProfile({ ...profile, age });
+  }
+  function segmentFromCard(seg: Segment) {
+    AsyncStorage.setItem('consent', 'yes').catch(() => {});
+    setConsent(true);
+    answerSegment(seg).catch(() => {}); // Ben sekmesi ve ana ekran, kayıt değişince kendini yeniler
   }
 
   function chooseFilter(id: FilterId) {
@@ -3322,11 +3411,15 @@ export default function HomeScreen() {
 
   if (selected) {
     const { bg, fg } = selected;
+    // 1.5.8: şehir, yaş, cinsiyet ve kampüs düğmeleri yalnızca o an oran gösterebilecekse görünür
+    // (boş ekrana düşülmesin). Bilgisi girilmemiş olanlar da görünmez; yaş sonuç ekranındaki karttan,
+    // diğerleri Ben sekmesinden girilir.
     const visibleFilters = FILTERS.filter(
       (f) =>
         (f.id !== 'city' || profile.country === COUNTRY_TR) &&
         (f.id !== 'campus' || !!campus) &&
-        (f.id !== 'country' || countryFilterOn)
+        (f.id !== 'country' || countryFilterOn) &&
+        (f.id === 'world' || f.id === 'country' || f.id === filter || filterEnough[f.id] === true)
     );
     const others = computeOthers(othersRows, selected.id, !!selected.mood, othersMin);
     const needsProfile = filter !== 'world';
@@ -3689,6 +3782,19 @@ export default function HomeScreen() {
               {body}
             </ScrollView>
           )}
+
+          {/* 1.5.8: alt soru / yaş kartı / "senin gibiler" özeti (aynı anda yalnızca biri, tek satır) */}
+          {!picking && (resultShown || noData) && !ratioError ? (
+            <ResultExtraCard
+              activityId={selected.id}
+              lang={lang}
+              age={consent ? profile.age : undefined}
+              segment={segmentOf(me)}
+              bottomInset={insets.bottom}
+              onAge={ageFromCard}
+              onSegment={segmentFromCard}
+            />
+          ) : null}
 
           {/* Selam: kaydırma alanının dışında, her ekran boyunda görünür kalsın */}
           {!picking && (resultShown || noData) && !ratioError ? (
@@ -4218,13 +4324,7 @@ export default function HomeScreen() {
         </View>
       ) : null}
       {tabBar}
-      <WelcomeSheet
-        visible={welcomeOpen}
-        lang={lang}
-        onStart={closeWelcome}
-        onInvite={inviteFromWelcome}
-        onStudent={studentFromWelcome}
-      />
+      <WelcomeSheet visible={welcomeOpen} lang={lang} onDone={finishWelcome} />
       {welcomeSchoolOpen && !welcomeOpen ? (
         <WelcomeSchoolPicker lang={lang} onClose={() => setWelcomeSchoolOpen(false)} />
       ) : null}
@@ -4883,6 +4983,32 @@ const styles = StyleSheet.create({
 // ---- 1.3.0 (9): Hoş geldin kartı, paylaş ipucu, boş ekran ----
 const VIOLET = '#3F3BC9';
 const ws = StyleSheet.create({
+  segGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm, marginTop: SP.md },
+  segBtn: {
+    width: '48.5%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SP.sm,
+    borderRadius: 16,
+    paddingVertical: SP.md + 2,
+    paddingHorizontal: SP.md,
+    backgroundColor: '#ffffff',
+    borderWidth: 1.5,
+    borderColor: '#E4E6EE',
+  },
+  segBtnOn: { borderColor: VIOLET, backgroundColor: '#EEF0FF' },
+  segEmoji: { fontSize: 20 },
+  segText: { flex: 1, fontFamily: F.bold, fontSize: FS.base, color: INK },
+  profileBox: { marginTop: SP.lg, paddingTop: SP.lg, borderTopWidth: 1, borderTopColor: '#E9EAF0' },
+  profileKicker: { fontFamily: F.bold, fontSize: 11, letterSpacing: 0.8, color: SOFT },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm, marginTop: SP.sm },
+  chip: { borderRadius: 999, paddingVertical: 8, paddingHorizontal: 13, borderWidth: 1.5, borderColor: '#E4E6EE', backgroundColor: '#ffffff' },
+  chipOn: { borderColor: VIOLET, backgroundColor: VIOLET },
+  chipText: { fontFamily: F.medium, fontSize: FS.sm + 1, color: INK },
+  chipTextOn: { color: '#ffffff' },
+  privacy: { fontFamily: F.regular, fontSize: 12, lineHeight: 17, color: SOFT, marginTop: SP.lg },
+  skip: { alignSelf: 'center', paddingTop: SP.md },
+  skipText: { fontFamily: F.medium, fontSize: FS.sm + 1, color: SOFT },
   studentBox: { marginTop: SP.xl, backgroundColor: '#F6F6FB', borderRadius: 18, padding: SP.lg },
   studentQ: { fontFamily: F.bold, fontSize: FS.md, color: '#16233F' },
   studentSub: { fontFamily: F.regular, fontSize: FS.sm, lineHeight: 18, color: SOFT, marginTop: 4 },
@@ -4899,7 +5025,8 @@ const ws = StyleSheet.create({
     borderTopRightRadius: 28,
     paddingHorizontal: SP.xxl,
     paddingTop: SP.md,
-    paddingBottom: SP.xxxl + SP.sm,
+    paddingBottom: SP.xxxl,
+    maxHeight: '92%',
   },
   handle: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: '#D9DBE1', marginBottom: SP.lg },
   emoji: { fontSize: 44, marginBottom: SP.sm },
@@ -4918,7 +5045,7 @@ const ws = StyleSheet.create({
   rowEmoji: { fontSize: 15 },
   rowText: { flex: 1, fontFamily: F.regular, fontSize: FS.md, lineHeight: 21, color: INK, paddingTop: 4 },
   primary: {
-    marginTop: SP.xxl,
+    marginTop: SP.lg,
     backgroundColor: VIOLET,
     borderRadius: 18,
     paddingVertical: SP.lg,

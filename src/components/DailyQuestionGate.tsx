@@ -49,6 +49,7 @@ import {
   questionText,
   SERIES_LENGTH,
   skipToday,
+  noteGateShown,
   snoozeWeek,
   submitAnswer,
 } from '@/lib/dailyQuestion';
@@ -179,6 +180,7 @@ export function DailyQuestionGate() {
   const doneAnim = useRef(new Animated.Value(0)).current;
 
   const tx = (lang as string) === 'tr' ? TEXT.tr : TEXT.en;
+  const compact = phase === 'done' && askNotif === 'ask';
 
   // Açılışta / uygulamaya dönünce: önce bekleyen sonuç var mı, yoksa bugünün sorusu
   async function check() {
@@ -230,6 +232,7 @@ export function DailyQuestionGate() {
     whenOverlayFree(() => {
       if (visibleRef.current) return;
       open();
+      noteGateShown().catch(() => {});
       track('question_shown', { day: q.day_date, source: 'gate' });
     }, 'gate');
   }
@@ -425,11 +428,15 @@ export function DailyQuestionGate() {
     close();
   }
 
-  // Koyu alana dokunmak: cevap verildiyse kapat, verilmediyse "Bugün geç" say
+  // Koyu alana dokunmak / geri tuşu: cevap verildiyse kapat.
+  // 1.5.8: verilmediyse artık "Bugün geç" sayılmaz; yalnızca kapanır ve sonraki açılışta tekrar sorulur
+  // (günde en fazla 3 gösterim, arada en az 45 dk: bkz. gateAllowedToday).
   function onBackdrop() {
     if (phase === 'sending' || phase === 'predicting') return;
-    if (phase === 'done' || phase === 'predict') close();
-    else onSkip();
+    if (phase !== 'done' && phase !== 'predict' && question) {
+      track('question_skipped', { day: question.day_date, how: 'dismiss' });
+    }
+    close();
   }
 
   if (reveal) {
@@ -454,18 +461,21 @@ export function DailyQuestionGate() {
         </Animated.View>
 
         <Animated.View style={[styles.card, predicting && styles.cardPredict, { transform: [{ translateY: slide }] }]}>
-          <View style={styles.topRow}>
-            {/* 1.5.5: tahmin adımı sorunun tekrarı sanılmasın: üst satır, renk ve başlık değişir */}
-            <View style={[styles.introIcon, predicting && styles.introIconPredict]}>
-              {predicting ? <Text style={{ fontSize: 20 }}>🎯</Text> : <ChatCircleDots size={23} color={AMBER_FG} weight="duotone" />}
-            </View>
-            <Text style={styles.intro}>{predicting ? tx.predictIntro : tx.intro}</Text>
-            {personalDay > 0 && !predicting ? (
-              <View style={styles.dayPill}>
-                <Text style={styles.dayPillText}>{tx.day(personalDay)}</Text>
+          {/* 1.5.8: izin sorusu çıkınca kart küçük ekrana sığsın diye üst satır gizlenir */}
+          {compact ? null : (
+            <View style={styles.topRow}>
+              {/* 1.5.5: tahmin adımı sorunun tekrarı sanılmasın: üst satır, renk ve başlık değişir */}
+              <View style={[styles.introIcon, predicting && styles.introIconPredict]}>
+                {predicting ? <Text style={{ fontSize: 20 }}>🎯</Text> : <ChatCircleDots size={23} color={AMBER_FG} weight="duotone" />}
               </View>
-            ) : null}
-          </View>
+              <Text style={styles.intro}>{predicting ? tx.predictIntro : tx.intro}</Text>
+              {personalDay > 0 && !predicting ? (
+                <View style={styles.dayPill}>
+                  <Text style={styles.dayPillText}>{tx.day(personalDay)}</Text>
+                </View>
+              ) : null}
+            </View>
+          )}
 
           {predicting ? (
             <View style={styles.head}>
@@ -496,8 +506,8 @@ export function DailyQuestionGate() {
           )}
 
           {phase === 'done' ? (
-            <Animated.View style={[styles.doneCard, { opacity: doneAnim, transform: [{ scale: doneScale }] }]}>
-              <CheckCircle size={44} color={AMBER_FG} weight="fill" />
+            <Animated.View style={[styles.doneCard, compact && styles.doneCardCompact, { opacity: doneAnim, transform: [{ scale: doneScale }] }]}>
+              <CheckCircle size={compact ? 34 : 44} color={AMBER_FG} weight="fill" />
               <Text style={styles.doneTitle}>{tx.doneTitle}</Text>
               {pickedOption ? <Text style={styles.donePicked}>{optionLabel(pickedOption, lang)}</Text> : null}
               <Text style={styles.doneText}>{club ? tx.doneClub(club) : tx.doneGeneric}</Text>
@@ -598,7 +608,7 @@ export function DailyQuestionGate() {
 }
 
 const styles = StyleSheet.create({
-  askBox: { marginTop: 16, alignItems: 'stretch' },
+  askBox: { marginTop: 12, alignItems: 'stretch' },
   askTitle: { fontFamily: F.bold, fontSize: 19, color: INK, textAlign: 'center' },
   askText: { fontFamily: F.medium, fontSize: 14.5, lineHeight: 20, color: '#4A4F66', textAlign: 'center', marginTop: 6, marginBottom: 2 },
   askLater: { alignSelf: 'center', paddingVertical: 12 },
@@ -786,6 +796,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#EEEDFB',
   },
   predictionText: { fontFamily: F.bold, fontSize: 15, color: '#3F3BC9', textAlign: 'center' },
+  doneCardCompact: { marginTop: 14, padding: 16, gap: 6 },
   doneCard: {
     marginTop: 20,
     padding: 22,

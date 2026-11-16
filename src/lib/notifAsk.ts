@@ -36,10 +36,13 @@ export async function canAskNotif(): Promise<boolean> {
   }
 }
 
-// Son 7 gün içinde soruldu mu? (aynı oturumda ana ekran ikinci kez sormasın)
+// Soru kartında az önce soruldu mu? (aynı gün ana ekran ikinci kez sormasın)
+// 1.5.8: süre 7 günden 20 saate indi. Soru kartında "Şimdi değil" diyen, ertesi gün ilk anını
+// seçtikten sonra ana ekrandaki Günün Anı kartını bir kez daha görür (ikinci şans).
+const HOME_GAP_MS = 20 * 60 * 60 * 1000;
 export async function notifAskedRecently(): Promise<boolean> {
   const s = await read();
-  return !!s.last && Date.now() - s.last < GAP_MS;
+  return !!s.last && Date.now() - s.last < HOME_GAP_MS;
 }
 
 export async function noteNotifAsk(): Promise<void> {

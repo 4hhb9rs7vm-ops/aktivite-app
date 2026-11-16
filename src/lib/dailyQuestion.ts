@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ensureSession, supabase } from '@/lib/supabase';
 import type { Lang } from '@/lib/i18n';
 import { noteResultSeen } from '@/lib/overlay';
+import { currentSegment, isStudentSegment, type Segment } from '@/lib/me';
 
 export type DQOption = {
   key: string;
@@ -222,13 +223,17 @@ export async function submitAnswer(q: DailyQuestion, optionKey: string, lang: La
   if (!(await ensureSession())) return null;
   const { country, age } = await readProfile();
 
-  const { error } = await supabase.from('daily_answers').insert({
-    question_id: q.id,
-    option_key: optionKey,
-    country,
-    age_range: age,
-    lang,
-  });
+  // 1.5.8: kişinin durumu da yazılır (sonuçta "öğrenciler ne dedi" satırı için).
+  // Sunucuda sütun henüz yoksa eski biçimle bir kez daha denenir.
+  const base = { question_id: q.id, option_key: optionKey, country, age_range: age, lang };
+  const consent = (await AsyncStorage.getItem('consent').catch(() => null)) === 'yes';
+  const segment = consent ? await currentSegment().catch(() => null) : null;
+  let { error } = segment
+    ? await supabase.from('daily_answers').insert({ ...base, segment })
+    : await supabase.from('daily_answers').insert(base);
+  if (error && segment && error.code !== '23505') {
+    ({ error } = await supabase.from('daily_answers').insert(base));
+  }
 
   if (error && error.code !== '23505') return null;
 
@@ -279,6 +284,31 @@ export async function fetchResults(q: DailyQuestion): Promise<DQResult | null> {
     .in('scope', scopes);
   if (error || !data || data.length === 0) return null;
   return pickResult(q, data as ResultRow[]);
+}
+
+// 1.5.8: Sonuç ekranındaki "senin grubun ne dedi" satırı. Grupta en az 10 cevap varsa döner.
+// Şimdilik yalnızca öğrenciler bu eşiği geçiyor; çalışanlar ve evde olanlar sayı dolunca kendiliğinden açılır.
+export const GROUP_MIN_ANSWERS = 10;
+export type GroupLine = { segment: Segment; optionKey: string; pct: number };
+export async function fetchGroupLine(q: DailyQuestion): Promise<GroupLine | null> {
+  try {
+    const seg = await currentSegment();
+    if (!seg) return null;
+    if (!(await ensureSession())) return null;
+    const scope = isStudentSegment(seg) ? 'seg:student' : seg === 'worker' ? 'seg:worker' : 'seg:home';
+    const { data, error } = await supabase
+      .from('daily_results')
+      .select('option_key, total, pct')
+      .eq('question_id', q.id)
+      .eq('scope', scope);
+    if (error || !data || data.length === 0) return null;
+    const rows = data as { option_key: string; total: number; pct: number | string }[];
+    if (Number(rows[0].total) < GROUP_MIN_ANSWERS) return null;
+    const top = rows.reduce((a, b) => (Number(b.pct) > Number(a.pct) ? b : a));
+    return { segment: isStudentSegment(seg) ? 'student' : seg, optionKey: top.option_key, pct: Math.round(Number(top.pct)) };
+  } catch {
+    return null;
+  }
 }
 
 // Gün içinde "kalabalık" bilgisi: 3.000'in altındaysa null (hiç gösterilmez), üstündeyse net adet.
@@ -453,10 +483,35 @@ export async function snoozeWeek() {
   await AsyncStorage.setItem(SNOOZE_UNTIL_KEY, String(Date.now() + WEEK_MS)).catch(() => {});
 }
 
+// 1.5.8: Soru "Bugün geç" denmeden kapatıldıysa (dışarı dokunma, geri tuşu) o gün tekrar sorulur.
+// Israr olmasın diye günde en fazla 3 gösterim ve iki gösterim arasında en az 45 dakika.
+const GATE_SHOWN_KEY = 'dq_gate_shown_v1';
+const GATE_MAX_PER_DAY = 3;
+const GATE_MIN_GAP_MS = 45 * 60 * 1000;
+
+async function gateShownToday(): Promise<{ n: number; at: number }> {
+  try {
+    const raw = await AsyncStorage.getItem(GATE_SHOWN_KEY);
+    const v = raw ? JSON.parse(raw) : null;
+    if (v && v.day === istanbulToday()) return { n: Number(v.n) || 0, at: Number(v.at) || 0 };
+  } catch {}
+  return { n: 0, at: 0 };
+}
+
+export async function noteGateShown(): Promise<void> {
+  try {
+    const cur = await gateShownToday();
+    await AsyncStorage.setItem(GATE_SHOWN_KEY, JSON.stringify({ day: istanbulToday(), n: cur.n + 1, at: Date.now() }));
+  } catch {}
+}
+
 // Giriş ekranında soru gösterilsin mi? (soru verisinden önceki hızlı kontroller)
 export async function gateAllowedToday(): Promise<boolean> {
   try {
     if (!isBeforeResults()) return false; // 21:00'den sonra soru yok, sadece sonuç
+    const shown = await gateShownToday();
+    if (shown.n >= GATE_MAX_PER_DAY) return false;
+    if (shown.n > 0 && Date.now() - shown.at < GATE_MIN_GAP_MS) return false;
     const [welcome, skipDay, snooze] = await Promise.all([
       AsyncStorage.getItem(WELCOME_KEY),
       AsyncStorage.getItem(SKIP_DAY_KEY),

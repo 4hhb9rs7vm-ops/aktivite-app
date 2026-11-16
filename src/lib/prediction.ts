@@ -120,6 +120,7 @@ export type PointsByKind = {
   welcome: number;
   share: number; // 1.5.7: ilk paylaşım
   invite: number; // 1.5.7: bağlantıdan katılan arkadaşlar
+  profile: number; // 1.5.8: yaşını ekleme
 };
 export const STREAK_STEPS: { day: number; points: number }[] = [
   { day: 3, points: 10 },
@@ -208,6 +209,7 @@ export async function fetchPredictionWeeks(force = false): Promise<PredictionWee
         welcome: Number(d.by_kind?.welcome) || 0,
         share: Number(d.by_kind?.share) || 0,
         invite: Number(d.by_kind?.invite) || 0,
+        profile: Number(d.by_kind?.profile) || 0,
       },
       streak: Number(d.streak) || 0,
       history,
@@ -314,6 +316,25 @@ export async function claimShareBonus(): Promise<boolean> {
     await AsyncStorage.setItem(SHARE_CLAIMED_KEY, '1').catch(() => {});
     pointsChanged();
     showBonusMoment({ kind: 'share', points: SHARE_POINTS });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// 1.5.8: Yaşını ekleyene bir kereliğine 10 puan (sunucuda user_badges'e 'bonus_age').
+export const AGE_POINTS = 10;
+const AGE_CLAIMED_KEY = 'age_points_v1';
+export async function claimAgeBonus(): Promise<boolean> {
+  try {
+    if (await AsyncStorage.getItem(AGE_CLAIMED_KEY)) return false;
+    if (!(await ensureSession())) return false;
+    const { error } = await supabase
+      .from('user_badges')
+      .upsert([{ badge_id: 'bonus_age' }], { onConflict: 'user_id,badge_id', ignoreDuplicates: true });
+    if (error) return false;
+    await AsyncStorage.setItem(AGE_CLAIMED_KEY, '1').catch(() => {});
+    pointsChanged();
     return true;
   } catch {
     return false;

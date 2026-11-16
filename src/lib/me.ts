@@ -12,7 +12,8 @@ export const FRIENDS_TAB_ENABLED = true;
 
 export type Me = {
   displayName?: string;
-  occupation?: string; // OCCUPATIONS içindeki id
+  occupation?: string; // OCCUPATIONS içindeki id (1.5.8'den beri ekranda gösterilmez; Kampüs mantığı 'student' değerini kullanır)
+  segment?: Segment; // 1.5.8: durum (öğrenci / çalışan / her ikisi / evde)
   university?: string; // Üniversitenin adı ya da UNIVERSITY_OTHER
   moodShare?: boolean; // Ruh hallerimi arkadaşlarım görsün (varsayılan kapalı)
 };
@@ -49,6 +50,53 @@ export function onProfileChanged(cb: () => void): () => void {
   return () => {
     profileListeners.delete(cb);
   };
+}
+
+// ---- Durum (1.5.8) ----
+// İlk girişte ve Ben sekmesinde sorulur. Meslek listesinin yerini aldı; Kampüs Ligi'nin
+// kullandığı occupation === 'student' bilgisi buradan eşitlenir.
+export type Segment = 'student' | 'worker' | 'both' | 'home';
+export const SEGMENTS: { id: Segment; tr: string; en: string; emoji: string }[] = [
+  { id: 'student', tr: 'Öğrenciyim', en: "I'm a student", emoji: '🎓' },
+  { id: 'worker', tr: 'Çalışıyorum', en: 'I work', emoji: '💼' },
+  { id: 'both', tr: 'Her ikisi', en: 'Both', emoji: '🎓💼' },
+  { id: 'home', tr: 'Evdeyim', en: "I'm at home", emoji: '🏡' },
+];
+
+// Kayıtlı durum; yoksa eski meslek seçiminden çıkarılır.
+export function segmentOf(me: Me): Segment | null {
+  if (me.segment) return me.segment;
+  if (!me.occupation) return null;
+  if (me.occupation === 'student') return 'student';
+  if (me.occupation === 'home' || me.occupation === 'retired') return 'home';
+  if (me.occupation === 'other') return null;
+  return 'worker';
+}
+
+export function segmentLabel(seg: Segment | null, lang: Lang): string {
+  const s = SEGMENTS.find((x) => x.id === seg);
+  return s ? s[lang === 'tr' ? 'tr' : 'en'] : '';
+}
+
+export function isStudentSegment(seg: Segment | null): boolean {
+  return seg === 'student' || seg === 'both';
+}
+
+// Durumu değiştir: öğrenci (ya da her ikisi) ise meslek 'student' olur; değilse okul bilgisi silinir.
+export function withSegment(me: Me, seg: Segment | null): Me {
+  const next: Me = { ...me };
+  if (seg) next.segment = seg;
+  else delete next.segment;
+  if (isStudentSegment(seg)) next.occupation = 'student';
+  else {
+    delete next.occupation;
+    delete next.university;
+  }
+  return next;
+}
+
+export async function currentSegment(): Promise<Segment | null> {
+  return segmentOf(await loadMe());
 }
 
 // ---- Meslek ----

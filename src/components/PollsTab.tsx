@@ -40,6 +40,8 @@ import {
 } from '@/lib/dailyQuestion';
 import { DailyResultReveal } from '@/components/DailyResultReveal';
 import { scheduleResultNotification } from '@/lib/notifications';
+import { acceptNotifAsk, canAskNotif, noteNotifAsk } from '@/lib/notifAsk';
+import { registerPushToken } from '@/lib/ask';
 import { track } from '@/lib/analytics';
 import { checkBadges } from '@/lib/badges';
 
@@ -135,6 +137,7 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [streak, setStreak] = useState(0);
   const [sendingKey, setSendingKey] = useState<string | null>(null);
+  const [askNotif, setAskNotif] = useState<'no' | 'ask' | 'ok'>('no'); // 1.5.8: cevaptan sonra bildirim izni sorusu
   const [reveal, setReveal] = useState<{ data: PendingReveal; kicker: string } | null>(null);
   const [crowd, setCrowd] = useState<number | null>(null); // bugün 3.000+ cevap varsa eşik
   const [, setTick] = useState(0); // geri sayım için dakikada bir yeniden çiz
@@ -202,6 +205,34 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
       prev ? prev.map((i) => (i.question.id === todayItem.question.id ? { ...i, myKey: saved } : i)) : prev
     );
     setStreak(await getStreak());
+    // 1.5.8: soruyu burada cevaplayana da "haber verelim mi?" sorulur (önceden yalnızca tam ekran soruda vardı)
+    canAskNotif()
+      .then((ok) => {
+        if (!ok) return;
+        noteNotifAsk().catch(() => {});
+        track('notif_ask_shown', { source: 'polls' });
+        setAskNotif('ask');
+      })
+      .catch(() => {});
+  }
+
+  async function onNotifYes() {
+    if (!todayItem) return;
+    Haptics.selectionAsync().catch(() => {});
+    const r = await acceptNotifAsk();
+    track('notif_ask_answer', { answer: r });
+    if (r === 'granted') {
+      setAskNotif('ok');
+      registerPushToken(true).catch(() => {});
+      const o = todayItem.question.options.find((x) => x.key === todayItem.myKey);
+      scheduleResultNotification(todayItem.question.day_date, o ? clubName(o, lang) : null);
+    } else setAskNotif('no');
+  }
+
+  function onNotifNo() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    track('notif_ask_answer', { answer: 'later' });
+    setAskNotif('no');
   }
 
   function openResult(item: PollItem) {
@@ -295,6 +326,28 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
                   {tx.crowd(crowd.toLocaleString((lang as string) === 'tr' ? 'tr-TR' : 'en-US'))}
                 </Text>
               </View>
+            ) : null}
+            {askNotif === 'ask' ? (
+              <View style={styles.askBox}>
+                <Text style={styles.askTitle}>
+                  {(lang as string) === 'tr' ? 'Açıklanınca sana haber verelim mi?' : 'Want a heads-up when results are out?'}
+                </Text>
+                <View style={styles.askRow}>
+                  <Pressable onPress={onNotifYes} style={styles.askYes} accessibilityRole="button">
+                    <Text style={styles.askYesText}>{(lang as string) === 'tr' ? 'Haber ver' : 'Notify me'}</Text>
+                  </Pressable>
+                  <Pressable onPress={onNotifNo} style={styles.askNo} accessibilityRole="button">
+                    <Text style={styles.askNoText}>{(lang as string) === 'tr' ? 'Şimdi değil' : 'Not now'}</Text>
+                  </Pressable>
+                </View>
+                <Text style={styles.askNote}>
+                  {(lang as string) === 'tr' ? 'Gereksiz bildirim göndermeyiz.' : "We won't send unnecessary notifications."}
+                </Text>
+              </View>
+            ) : askNotif === 'ok' ? (
+              <Text style={styles.askDone}>
+                {(lang as string) === 'tr' ? "✓ Tamam, 21:00'de haber vereceğiz." : "✓ Done. We'll let you know at 9 PM."}
+              </Text>
             ) : null}
           </View>
         ) : item.myKey ? (
@@ -574,6 +627,15 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: INK,
   },
+  askBox: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(15,42,82,0.10)' },
+  askTitle: { fontFamily: F.bold, fontSize: 15, color: NAVY },
+  askRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  askYes: { flex: 1, height: 44, borderRadius: 14, backgroundColor: NAVY, alignItems: 'center', justifyContent: 'center' },
+  askYesText: { fontFamily: F.bold, fontSize: 15, color: '#fff' },
+  askNo: { flex: 1, height: 44, borderRadius: 14, backgroundColor: 'rgba(15,42,82,0.08)', alignItems: 'center', justifyContent: 'center' },
+  askNoText: { fontFamily: F.bold, fontSize: 15, color: NAVY },
+  askNote: { fontFamily: F.medium, fontSize: 12, color: AMBER_FG, marginTop: 8 },
+  askDone: { fontFamily: F.bold, fontSize: 14, color: NAVY, marginTop: 12 },
   waitBox: {
     marginTop: 14,
     padding: 14,

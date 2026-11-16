@@ -31,6 +31,7 @@ import {
   CampusStatus,
   ensureCampusState,
   fetchCampusStatus,
+  fetchCampusTop,
   hasConsent,
   isMondayOrTuesday,
   leagueSchool,
@@ -122,6 +123,8 @@ const T = {
       n === 1 ? 'Yeni hafta · son 1 kişi' : n >= 7 ? 'Yeni hafta başladı · okulunu ilk sen taşı 🚀' : `Yeni hafta başladı · ${n} kişi eksik`,
     cardNewWeekListed: 'Bu hafta da listedesiniz ✅',
     cardNotListed: 'Listeye giremedi 😕',
+    cardNotListedSchool: (s: string) => `${s} listeye giremedi 😕`,
+    cardTopKicker: '🏆 GEÇEN HAFTA · EN KALABALIK 3 OKUL',
     cardNoConsent: 'Karşılaştırma onayın kapalı, okulun ligde sayılmıyor.',
     cardGiveConsent: 'Onay ver',
     cardLoading: 'Okulunun durumu yükleniyor…',
@@ -172,6 +175,8 @@ const T = {
       n === 1 ? 'New week · last 1 person' : n >= 7 ? 'New week · be the first from your school 🚀' : `New week · ${n} more needed`,
     cardNewWeekListed: "You're on the list this week too ✅",
     cardNotListed: "Didn't make the list 😕",
+    cardNotListedSchool: (s: string) => `${s} didn't make the list 😕`,
+    cardTopKicker: '🏆 LAST WEEK · TOP 3 SCHOOLS',
     cardNoConsent: "Comparison consent is off, so your school isn't counted.",
     cardGiveConsent: 'Give consent',
     cardLoading: "Loading your school's status…",
@@ -781,6 +786,7 @@ export function CampusLeagueCard({ me, lang }: { me: Me; lang: Lang }) {
   const [status, setStatus] = useState<CampusStatus | null>(null);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [top, setTop] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     if (!school) return;
@@ -792,6 +798,12 @@ export function CampusLeagueCard({ me, lang }: { me: Me; lang: Lang }) {
     setLoading(false);
     setFailed(!st);
     setStatus(st);
+    // Geçen haftanın ilk 3'ü yalnızca "listeye giremedi" kartında gösterilir
+    if (st && !st.lastListed && st.lastPlayed && isMondayOrTuesday()) {
+      fetchCampusTop()
+        .then(setTop)
+        .catch(() => {});
+    }
   }, [school]);
 
   useEffect(() => {
@@ -879,8 +891,21 @@ export function CampusLeagueCard({ me, lang }: { me: Me; lang: Lang }) {
     if (!status.lastListed && status.lastPlayed && status.week) {
       return (
         <View style={[styles.card, { backgroundColor: '#2A1F3D' }]}>
-          <Text style={styles.cardKicker}>{t.cardLastKicker(s.toLocaleUpperCase(lang === 'tr' ? 'tr-TR' : 'en-US'))}</Text>
-          <Text style={[styles.cardTitle, { fontSize: 17 }]}>{t.cardNotListed}</Text>
+          <Text style={styles.cardKicker}>{top.length ? t.cardTopKicker : t.cardLastKicker(s.toLocaleUpperCase(lang === 'tr' ? 'tr-TR' : 'en-US'))}</Text>
+          {top.length ? (
+            <View style={styles.topRow}>
+              {top.map((u, i) => (
+                <View key={u} style={styles.topBox}>
+                  <Text style={styles.topText} numberOfLines={1}>
+                    {['🥇', '🥈', '🥉'][i]} {shortSchool(u)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+          <Text style={[styles.cardTitle, { fontSize: 17, marginTop: top.length ? 12 : 4 }]}>
+            {top.length ? t.cardNotListedSchool(s) : t.cardNotListed}
+          </Text>
           <View style={styles.cardRow}>
             <Text style={styles.cardSub}>{newWeek}</Text>
             {call}
@@ -1047,6 +1072,9 @@ const styles = StyleSheet.create({
   cardKicker: { fontFamily: F.bold, fontSize: 11, letterSpacing: 1.4, color: LAVENDER },
   cardTitle: { fontFamily: F.bold, fontSize: 19, color: '#fff', marginTop: 4 },
   cardSub: { flexShrink: 1, fontFamily: F.regular, fontSize: 12.5, lineHeight: 17, color: '#C9D3EE' },
+  topRow: { flexDirection: 'row', gap: 6, marginTop: 10 },
+  topBox: { flexShrink: 1, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 11, paddingVertical: 7, paddingHorizontal: 9, alignItems: 'center' },
+  topText: { fontFamily: F.bold, fontSize: 12.5, color: '#fff' },
   cardRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 12 },
   callBtn: {
     flexDirection: 'row',

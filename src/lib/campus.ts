@@ -232,6 +232,18 @@ export async function fetchCampusStatus(university: string): Promise<CampusStatu
   }
 }
 
+// Geçen hafta en çok öğrencisi oynayan 3 okul (Ben sekmesindeki "listeye giremedi" kartı için)
+export async function fetchCampusTop(): Promise<string[]> {
+  try {
+    if (!(await ensureSession())) return [];
+    const { data, error } = await supabase.rpc('get_campus_top');
+    if (error || !Array.isArray(data)) return [];
+    return data.map((x: any) => String(x ?? '')).filter(Boolean).slice(0, 3);
+  } catch {
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------- yerel durum
 type CampusState = { uni: string; day: string; lockShown: boolean; resultWeek: string };
 

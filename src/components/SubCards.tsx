@@ -91,6 +91,11 @@ function ChipsCard({
   onPick: (key: string) => void;
   onDismiss?: () => void;
 }) {
+  // Şıklar ekrana sığmıyorsa sağda küçük bir ok görünür; sona kaydırılınca kaybolur
+  const [boxW, setBoxW] = useState(0);
+  const [contentW, setContentW] = useState(0);
+  const [x, setX] = useState(0);
+  const hasMore = boxW > 0 && contentW > boxW + 4 && x < contentW - boxW - 8;
   return (
     <View style={st.card}>
       <View style={st.cardHead}>
@@ -104,7 +109,17 @@ function ChipsCard({
           </Pressable>
         ) : null}
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.chips} keyboardShouldPersistTaps="handled">
+      <View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={st.chips}
+        keyboardShouldPersistTaps="handled"
+        onLayout={(e) => setBoxW(e.nativeEvent.layout.width)}
+        onContentSizeChange={(w) => setContentW(w)}
+        onScroll={(e) => setX(e.nativeEvent.contentOffset.x)}
+        scrollEventThrottle={32}
+      >
         {options.map((o) => (
           <Pressable
             key={o.key}
@@ -119,6 +134,12 @@ function ChipsCard({
           </Pressable>
         ))}
       </ScrollView>
+      {hasMore ? (
+        <View style={st.moreHint} pointerEvents="none">
+          <Text style={st.moreHintText}>›</Text>
+        </View>
+      ) : null}
+      </View>
       {note ? <Text style={st.note}>{note}</Text> : null}
     </View>
   );
@@ -135,6 +156,20 @@ function SummaryCard({ kicker, text, more, onMore }: { kicker: string; text: str
       </View>
       {onMore && more ? <Text style={st.more}>{more} ›</Text> : null}
     </Pressable>
+  );
+}
+
+// Cevap verildi ama oran için henüz yeterli kişi yok: ince tek satır
+function PendingLine({ picked, text }: { picked: string; text: string }) {
+  return (
+    <View style={[st.card, st.pending]}>
+      <Text style={st.pendingPick} numberOfLines={1}>
+        ✓ {picked}
+      </Text>
+      <Text style={st.pendingText} numberOfLines={2}>
+        {text}
+      </Text>
+    </View>
   );
 }
 
@@ -272,18 +307,20 @@ export function ResultExtraCard({
     const rows = stats.rows;
     const top = rows && rows.length ? rows[0] : null;
     const group = T ? sub.group.tr : sub.group.en;
+    if (!top) {
+      return (
+        <PendingLine
+          picked={subLabel(activityId, stats.mine, lang)}
+          text={T ? 'Yeterince kişi cevaplayınca oranları burada görürsün' : "You'll see the breakdown here once enough people answer"}
+        />
+      );
+    }
     return (
       <>
         <SummaryCard
           kicker={group.toLocaleUpperCase(T ? 'tr-TR' : 'en-US')}
           text={
-            top
-              ? T
-                ? `%${top.pct}: ${subLabel(activityId, top.key, lang)}`
-                : `${top.pct}%: ${subLabel(activityId, top.key, lang)}`
-              : T
-                ? 'Cevabın kaydedildi. 5 kişi olunca dağılım burada açılır.'
-                : 'Answer saved. The breakdown opens once 5 people answer.'
+            T ? `%${top.pct}: ${subLabel(activityId, top.key, lang)}` : `${top.pct}%: ${subLabel(activityId, top.key, lang)}`
           }
           more={T ? 'Tümünü gör' : 'See all'}
           onMore={rows ? () => setSheet('sub') : undefined}
@@ -353,6 +390,22 @@ const st = StyleSheet.create({
   summary: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingRight: 14 },
   summaryText: { fontFamily: F.bold, fontSize: 15.5, lineHeight: 21, color: INK, marginTop: 2 },
   more: { fontFamily: F.bold, fontSize: 13.5, color: ACCENT },
+  moreHint: {
+    position: 'absolute',
+    right: 0,
+    top: 9,
+    bottom: 0,
+    width: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderTopLeftRadius: 14,
+    borderBottomLeftRadius: 14,
+  },
+  moreHintText: { fontFamily: F.bold, fontSize: 22, lineHeight: 24, color: ACCENT },
+  pending: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingRight: 14, borderRadius: 16 },
+  pendingPick: { flexShrink: 0, maxWidth: '45%', fontFamily: F.bold, fontSize: 14, color: INK },
+  pendingText: { flex: 1, fontFamily: F.regular, fontSize: 12.5, lineHeight: 16, color: MUTED },
   backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(10,14,28,0.45)' },
   sheet: { backgroundColor: '#ffffff', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 22, paddingTop: 10 },
   handle: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: '#D4D4D8', marginBottom: 16 },

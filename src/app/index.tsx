@@ -1227,6 +1227,8 @@ function FilterSegment({
     return () => anim.stop();
   }, [hint]);
 
+  // Tek seçenek ("Herkes") kaldıysa satır hiç gösterilmez; soru sormanın anlamı yok ve oran kartına yer açılır
+  if (filters.length < 2) return null;
   const title = lang === 'tr' ? 'Kimlerle karşılaştıralım?' : 'Compare with…';
   const labels: Record<FilterId, string> =
     lang === 'tr'
@@ -2146,10 +2148,12 @@ function WelcomeSheet({
   const [age, setAge] = useState<string | undefined>(undefined);
   const [gender, setGender] = useState<string | undefined>(undefined);
   const skip = () => onDone({ segment: null });
+  // Android'de panel gezinme çubuğunun altına uzanıyor; "Şimdilik geç" çubuğun arkasında kalmasın
+  const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={skip} statusBarTranslucent>
       <View style={ws.backdrop}>
-        <View style={ws.sheet}>
+        <View style={[ws.sheet, { paddingBottom: SP.xl + Math.max(insets.bottom, SP.md) }]}>
           <View style={ws.handle} />
           <ScrollView showsVerticalScrollIndicator={false} bounces={false} keyboardShouldPersistTaps="handled">
             <Text style={ws.title}>

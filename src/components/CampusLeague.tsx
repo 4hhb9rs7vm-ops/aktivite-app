@@ -42,6 +42,7 @@ import {
   shareCampusWhatsApp,
   shareMessage,
   shortSchool,
+  tinySchool,
   shouldAskStudent,
   statusTitle,
   syncLeagueNotification,
@@ -897,7 +898,7 @@ export function CampusLeagueCard({ me, lang }: { me: Me; lang: Lang }) {
               {top.map((u, i) => (
                 <View key={u} style={styles.topBox}>
                   <Text style={styles.topText} numberOfLines={1}>
-                    {['🥇', '🥈', '🥉'][i]} {shortSchool(u)}
+                    {['🥇', '🥈', '🥉'][i]} {tinySchool(u)}
                   </Text>
                 </View>
               ))}

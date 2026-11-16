@@ -41,6 +41,27 @@ export function shortSchool(name: string): string {
   return s || name;
 }
 
+// Dar yerlerde (lig kartındaki üç kutu) kullanılan kısaltmalar; listede yoksa kısa ad
+const ABBR: Record<string, string> = {
+  'Karadeniz Teknik Üniversitesi': 'KTÜ',
+  'Orta Doğu Teknik Üniversitesi': 'ODTÜ',
+  'İstanbul Teknik Üniversitesi': 'İTÜ',
+  'Yıldız Teknik Üniversitesi': 'YTÜ',
+  'Dokuz Eylül Üniversitesi': 'DEÜ',
+  'Bursa Teknik Üniversitesi': 'BTÜ',
+  'Gebze Teknik Üniversitesi': 'GTÜ',
+  'İstanbul Üniversitesi-Cerrahpaşa': 'İÜC',
+  'Eskişehir Osmangazi Üniversitesi': 'ESOGÜ',
+  'Eskişehir Teknik Üniversitesi': 'ESTÜ',
+  'Ondokuz Mayıs Üniversitesi': 'OMÜ',
+  'Süleyman Demirel Üniversitesi': 'SDÜ',
+  'Sakarya Üniversitesi': 'SAÜ',
+  'Kocaeli Üniversitesi': 'KOÜ',
+};
+export function tinySchool(name: string): string {
+  return ABBR[name] ?? shortSchool(name);
+}
+
 // Türkçe ilgi eki: İTÜ'nün, Boğaziçi'nin, Işık'ın, Anadolu'nun, Ege'nin
 export function genitive(name: string): string {
   const low = name.toLocaleLowerCase('tr-TR');

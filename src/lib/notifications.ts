@@ -11,11 +11,12 @@ const CHANNEL_ID = 'gunun-ani';
 const ID_PREFIX = 'gunun-ani-';
 const DAYS_AHEAD = 14; // Uygulama her açıldığında önümüzdeki 14 gün planlanır
 
-// Her kullanıcının kendi yerel saatiyle 11:00-20:00 arası başlar; 30 dk cevap penceresiyle en geç 20:30'da biter
-// (21:00'deki Günün Sorusu sonucuyla çakışmaz). 1.3.0 ile aynı pencere: tüm sürümlerde herkes aynı anda.
-// Aynı saat dilimindeki herkes aynı anda bildirim alır.
+// Her kullanıcının kendi yerel saatiyle 11:00-13:00 arası başlar (1.5.9; önceden 11:00-20:00).
+// Neden: bildirim öğleden sonraya kaldığı günlerde ertesi gün dönüşü akşama kayıyordu; öğle arası hem
+// çalışan hem öğrenci için telefona bakılan saat. 1.5.8 ve öncesi eski pencereyi kullanır, yani
+// güncellemeyenler o gün farklı bir saatte bildirim alır; aynı sürümdeki herkes yine aynı anda alır.
 const WINDOW_START_MIN = 11 * 60; // 11:00
-const WINDOW_END_MIN = 20 * 60; // 20:00
+const WINDOW_END_MIN = 13 * 60; // 13:00
 export const ANSWER_WINDOW_MIN = 30; // Bildirimden sonra cevap penceresi (dakika)
 
 // ---- Bildirim modülü (gerektiğinde yüklenir) ----
@@ -71,7 +72,7 @@ function hashString(s: string): number {
   return h >>> 0;
 }
 
-// Verilen günün "Günün Anı" saati (yerel saatle 11:00-20:00 arası, aynı günde herkeste aynı)
+// Verilen günün "Günün Anı" saati (yerel saatle 11:00-13:00 arası, aynı günde herkeste aynı)
 export function getMomentForDay(day: Date): Date {
   const range = WINDOW_END_MIN - WINDOW_START_MIN;
   const minuteOfDay = WINDOW_START_MIN + (hashString('gunun-ani:' + dateKey(day)) % range);

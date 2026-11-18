@@ -140,7 +140,7 @@ import { PollsTab } from '@/components/PollsTab';
 import { istanbulToday, pollsVisible } from '@/lib/dailyQuestion';
 import { track } from '@/lib/analytics';
 import { BadgesTab } from '@/components/BadgesTab';
-import { SelamCard } from '@/components/SelamCard';
+import { SelamBanner, SelamCard } from '@/components/SelamCard';
 import { checkBadges } from '@/lib/badges';
 import { fetchLatestSelamSummary, onSelamChanged, SelamSummary } from '@/lib/selam';
 import { answerAsks, onOpenTab, registerPushToken } from '@/lib/ask';
@@ -3055,7 +3055,9 @@ export default function HomeScreen() {
     setEditing(false);
     setRatio(null);
     setGuess(null);
-    setGuessing(true);
+    // 1.5.9: aktivite seçiminde tahmin adımı kaldırıldı; oran doğrudan gösterilir.
+    // (Günün Sorusu'ndaki "çoğunluk ne dedi" tahmini duruyor.)
+    setGuessing(false);
     pushPresence(a.id, fullProfile, consent).then(() => setRefreshKey((k) => k + 1));
     track('activity_pick', { id: a.id, moment: getTodayMoment().isOpen, first_today: firstToday, correction: graceUsed });
     setPickPoints(firstToday && !graceUsed);
@@ -4137,6 +4139,8 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.homeBody}>
+            {/* 1.5.9: son girişten beri yeni selam geldiyse tek satırlık şerit */}
+            <SelamBanner lang={lang} active={tab === 'now' && !selected && !dashboardOpen} style={{ marginTop: SP.md }} />
             {lockVisible ? (
               <PressableScale wrapStyle={{ marginTop: SP.lg }} style={hs.lockCard} onPress={() => reopenMoment(lock!)}>
                 <ActivityIcon activity={ACTIVITIES_BY_ID[lock!.id]} size={32} iconSize={17} />

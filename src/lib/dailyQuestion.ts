@@ -286,6 +286,27 @@ export async function fetchResults(q: DailyQuestion): Promise<DQResult | null> {
   return pickResult(q, data as ResultRow[]);
 }
 
+// 1.5.9: Cevaptan hemen sonra gösterilen "şu ana kadar" sonucu.
+// Sunucu yeterli cevap yoksa (eşik sunucuda, 20) enough=false döner; o zaman oran gösterilmez.
+// Fonksiyon sunucuda yoksa ya da bağlantı kurulamazsa null: çağıran eski "cevabın kaydedildi" kartına düşer.
+export type LiveResult = { enough: boolean; result: DQResult };
+export async function fetchLiveResult(q: DailyQuestion): Promise<LiveResult | null> {
+  try {
+    if (!(await ensureSession())) return null;
+    const { data, error } = await supabase.rpc('daily_live', { p_question_id: q.id });
+    if (error || !data || typeof data !== 'object') return null;
+    const d = data as { total?: number; enough?: boolean; rows?: { key: string; pct: number | string }[] | null };
+    const pct: Record<string, number> = {};
+    for (const o of q.options) pct[o.key] = 0;
+    const rows = Array.isArray(d.rows) ? d.rows : [];
+    for (const r of rows) if (r && typeof r.key === 'string' && r.key in pct) pct[r.key] = Number(r.pct) || 0;
+    const enough = d.enough === true && rows.length > 0;
+    return { enough, result: { scope: 'world', total: Number(d.total) || 0, pct } };
+  } catch {
+    return null;
+  }
+}
+
 // 1.5.8: Sonuç ekranındaki "senin grubun ne dedi" satırı. Grupta en az 10 cevap varsa döner.
 // Şimdilik yalnızca öğrenciler bu eşiği geçiyor; çalışanlar ve evde olanlar sayı dolunca kendiliğinden açılır.
 export const GROUP_MIN_ANSWERS = 10;
@@ -431,6 +452,9 @@ export type PendingReveal = {
   myKey: string | null; // null: soruyu cevaplamamış, akşam sonucu "izleyici" olarak görüyor
   result: DQResult;
   isYesterday: boolean;
+  // 1.5.9: 'final' (yoksa da bu): 21:00 kesin sonucu · 'live': cevaptan hemen sonra "şu ana kadar" sonucu
+  // · 'early': henüz yeterli cevap yok, oran gösterilmez
+  mode?: 'final' | 'live' | 'early';
 };
 
 // Gösterilmeyi bekleyen sonuç var mı?
@@ -506,9 +530,13 @@ export async function noteGateShown(): Promise<void> {
 }
 
 // Giriş ekranında soru gösterilsin mi? (soru verisinden önceki hızlı kontroller)
-export async function gateAllowedToday(): Promise<boolean> {
+// 1.5.9: late=true ise 21:00'den sonra da sorulur (21:01–23:50). Geç gelen soruyu cevaplar,
+// tahmin yapmaz ve kesin sonucu hemen görür; cevabı açıklanmış sonucu değiştirmez.
+export async function gateAllowedToday(late = false): Promise<boolean> {
   try {
-    if (!isBeforeResults()) return false; // 21:00'den sonra soru yok, sadece sonuç
+    if (late) {
+      if (!inEveningWindow()) return false;
+    } else if (!isBeforeResults()) return false; // 21:00'den sonra normal akışta soru yok
     const shown = await gateShownToday();
     if (shown.n >= GATE_MAX_PER_DAY) return false;
     if (shown.n > 0 && Date.now() - shown.at < GATE_MIN_GAP_MS) return false;

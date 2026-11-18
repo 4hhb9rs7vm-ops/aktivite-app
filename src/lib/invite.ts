@@ -11,6 +11,7 @@ import { track } from '@/lib/analytics';
 import { requestNotificationPermission } from '@/lib/notifications';
 import { registerPushToken } from '@/lib/ask';
 import { claimShareBonus, noteInviteBonusJoined } from '@/lib/prediction';
+import { loadMe } from '@/lib/me';
 
 // Davet sayfası (web). Alan adı gelince sadece bu satır değişir.
 export const INVITE_PAGE = 'https://4hhb9rs7vm-ops.github.io/aktivite-app/d/';
@@ -56,6 +57,50 @@ export function isValidCode(code: string): boolean {
 export function inviteUrl(code: string, name?: string): string {
   const n = name ? `&n=${encodeURIComponent(name.slice(0, 24))}` : '';
   return `${INVITE_PAGE}?c=${code}${n}`;
+}
+
+// İndirme sayfası (kişisel davet bağlantısı kurulamadığında)
+export const DOWNLOAD_PAGE = 'https://4hhb9rs7vm-ops.github.io/aktivite-app/indir/';
+
+// 1.5.9: paylaşılacak bağlantı. Görünen adı olan kişide kendi davet bağlantısı (arkadaşı gelince iki tarafa puan),
+// yoksa indirme sayfası. Ana ekrandaki paylaşımla aynı kural.
+export async function shareLink(): Promise<{ url: string; invite: boolean }> {
+  try {
+    const me = await loadMe();
+    if (me.displayName) {
+      const list = await getMyInvites();
+      const now = Date.now();
+      let inv = list.find((i) => i.expiresAt > now && i.uses < i.maxUses) ?? null;
+      if (!inv) {
+        const r = await createInvite();
+        if ('invite' in r) inv = r.invite;
+      }
+      if (inv) return { url: inviteUrl(inv.code, me.displayName), invite: true };
+    }
+  } catch {}
+  return { url: DOWNLOAD_PAGE, invite: false };
+}
+
+// 1.5.9: Günün Sorusu'nu arkadaşa soran mesaj. Karşı tarafa bir soru sorar; bağlantı metnin içinde gider.
+export function questionMessage(a: {
+  question: string;
+  answer: string;
+  club: string | null;
+  pct: number | null; // null: oran henüz yok
+  live: boolean; // true: "şu ana kadar", false: kesin sonuç
+  url: string;
+  lang: 'tr' | 'en' | string;
+}): string {
+  if (a.lang === 'tr') {
+    const mine = `Ben "${a.answer}" dedim`;
+    const stat = a.pct === null ? '.' : a.live ? `, şu ana kadar %${a.pct} benim gibi düşünüyor.` : `, %${a.pct} benim gibi düşünmüş.`;
+    const club = a.club ? ` ${a.club} üyesiyim 😄` : '';
+    return `${a.question}\n${mine}${stat}${club}\n\nSen ne derdin? Şu An'da cevapla, aynı kulüpte miyiz görelim 👇\n${a.url}`;
+  }
+  const mine = `I said "${a.answer}"`;
+  const stat = a.pct === null ? '.' : a.live ? `, and so far ${a.pct}% agree with me.` : `, and ${a.pct}% agreed with me.`;
+  const club = a.club ? ` I'm in the ${a.club} 😄` : '';
+  return `${a.question}\n${mine}${stat}${club}\n\nWhat would you say? Answer on Şu An and see if we're in the same club 👇\n${a.url}`;
 }
 
 // 1.5.7: an paylaşımı mesajı. Bağlantı metnin içinde gider; elle yapıştırmak gerekmez.

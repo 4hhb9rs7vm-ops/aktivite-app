@@ -1,6 +1,7 @@
 // Selam: aynı aktiviteyi yapanlara anonim "selam".
 // - Gün içinde gönderilir (her aktivite için günde bir kez).
-// - Gelen selamlar akşam 21:00'den sonra toplu görünür; 5'in altındaysa hiç gösterilmez.
+// - 1.5.9: gelen selamlar gün içinde hemen görünür (ana ekrandaki hap, an ekranındaki kart, "yeni selam" şeridi).
+//   Akşam 21:00 sonuç ekranındaki toplu şerit yine 5 ve üstünde çıkar.
 // - Kimin kime selam verdiği tutulmaz; sadece "bu gün bu aktivitede kaç selam var".
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ensureSession, supabase } from '@/lib/supabase';
@@ -86,10 +87,9 @@ export type SelamSummary = {
   byActivity: { id: string; count: number }[]; // çoktan aza
 };
 
-// Bir günün gelen selamları. 21:00'den önce bugün için null döner (akşam toplu görünür).
-export async function fetchSelamSummary(day: string): Promise<SelamSummary | null> {
+// Bir günün gelen selamları, saat ve alt sınır gözetmeden (toplam 0 da olabilir). Hata olursa null.
+async function loadSummary(day: string): Promise<SelamSummary | null> {
   try {
-    if (day === istanbulToday() && isBeforeResults()) return null;
     const acts = await activitiesOn(day);
     if (acts.length === 0) return null;
     if (!(await ensureSession())) return null;
@@ -107,16 +107,51 @@ export async function fetchSelamSummary(day: string): Promise<SelamSummary | nul
       rec[day] = total;
       await AsyncStorage.setItem(RECEIVED_KEY, JSON.stringify(rec)).catch(() => {});
     }
-    if (total < SELAM_MIN) return null;
     return { day, total, byActivity: rows };
   } catch {
     return null;
   }
 }
 
-// Ana ekran rozeti için: 21:00'den sonra bugünün, 21:00'den önce dünün selamları
+// Akşam sonuç ekranındaki toplu şerit: 21:00'den önce bugün için null, 5'in altındaysa null.
+export async function fetchSelamSummary(day: string): Promise<SelamSummary | null> {
+  if (day === istanbulToday() && isBeforeResults()) return null;
+  const s = await loadSummary(day);
+  return s && s.total >= SELAM_MIN ? s : null;
+}
+
+// 1.5.9: bugünün selamları, beklemeden (toplam 0 da olabilir)
+export async function fetchSelamLive(): Promise<SelamSummary | null> {
+  return loadSummary(istanbulToday());
+}
+
+// 1.5.9: bugün bu aktivitede bana gelen selam sayısı (an ekranındaki kart için). Bilinmiyorsa null.
+export async function fetchSelamCount(activityId: string): Promise<number | null> {
+  const s = await fetchSelamLive();
+  if (!s) return null;
+  return s.byActivity.find((r) => r.id === activityId)?.count ?? 0;
+}
+
+// Ana ekran hapı için: bugün en az bir selam geldiyse bugünün sayısı (canlı);
+// henüz gelmediyse ve saat 21:00'den önceyse dünün toplamı (5 ve üstü).
 export async function fetchLatestSelamSummary(): Promise<SelamSummary | null> {
-  return fetchSelamSummary(isBeforeResults() ? istanbulYesterday() : istanbulToday());
+  const today = await fetchSelamLive();
+  if (today && today.total > 0) return today;
+  if (!isBeforeResults()) return null;
+  const y = await loadSummary(istanbulYesterday());
+  return y && y.total >= SELAM_MIN ? y : null;
+}
+
+// 1.5.9: "son girişinden beri N yeni selam". Görülen son toplam telefonda tutulur (gün değişince sıfırlanır).
+const SEEN_KEY = 'selam_seen_v1'; // { day: 'YYYY-MM-DD', total: 12 }
+export async function newSelamsSince(total: number): Promise<number> {
+  const seen = await readJson<{ day?: string; total?: number }>(SEEN_KEY, {});
+  const base = seen.day === istanbulToday() ? Number(seen.total) || 0 : 0;
+  return Math.max(0, total - base);
+}
+export async function markSelamsSeen(total: number): Promise<void> {
+  await AsyncStorage.setItem(SEEN_KEY, JSON.stringify({ day: istanbulToday(), total })).catch(() => {});
+  emit();
 }
 
 // Bugüne kadar alınan toplam selam (telefonda biriken günlük toplamlardan)

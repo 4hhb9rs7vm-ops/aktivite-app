@@ -18,7 +18,8 @@ type Props = {
   dateLabel: string; // '4 Kasım'
   club: string | null; // 'Kafein Kulübü' (yoksa seçenek adı büyük yazılır)
   option: string; // 'İkisi de'
-  pct: number; // 0-100
+  pct: number | null; // 0-100; null: oran henüz yok (rozet çizilmez)
+  live?: boolean; // 1.5.9: gün içinde paylaşılan kart ("şu ana kadar", kesin sonuç değil)
   lang: Lang;
   tier?: TierId | null; // üyelik rozeti varsa kart çerçeveli olur
 };
@@ -37,6 +38,9 @@ const TEXT = {
   tr: {
     label: 'Günün Sorusu',
     with: 'benimle',
+    soFar: 'şu ana kadar',
+    forNow: 'Şimdilik',
+    askLive: 'Sen ne derdin? 👀',
     officially: 'Resmen',
     member: (o: string) => `üyesiyim · ${o}`,
     picked: 'Benim cevabım',
@@ -46,6 +50,9 @@ const TEXT = {
   en: {
     label: 'Question of the Day',
     with: 'with me',
+    soFar: 'so far',
+    forNow: 'For now in the',
+    askLive: 'What would you say? 👀',
     officially: 'Officially in the',
     member: (o: string) => `· ${o}`,
     picked: 'My answer',
@@ -55,7 +62,7 @@ const TEXT = {
 };
 
 export const StoryShareCard = forwardRef<View, Props>(function StoryShareCard(
-  { theme, artSvg, question, dateLabel, club, option, pct, lang, tier = null },
+  { theme, artSvg, question, dateLabel, club, option, pct, live = false, lang, tier = null },
   ref
 ) {
   const t = THEMES[theme];
@@ -99,15 +106,17 @@ export const StoryShareCard = forwardRef<View, Props>(function StoryShareCard(
 
       <View style={styles.artBox}>
         {artSvg ? <SvgXml xml={artSvg} width={312} height={250} /> : null}
-        <View style={[styles.sticker, { backgroundColor: stickerBg }]}>
-          <Text style={[styles.stickerPct, { color: stickerFg }]}>%{Math.round(pct)}</Text>
-          <Text style={[styles.stickerSub, { color: stickerSub }]}>{tx.with}</Text>
-        </View>
+        {pct === null ? null : (
+          <View style={[styles.sticker, { backgroundColor: stickerBg }]}>
+            <Text style={[styles.stickerPct, { color: stickerFg }]}>%{Math.round(pct)}</Text>
+            <Text style={[styles.stickerSub, { color: stickerSub }, live && { fontSize: 9.5 }]}>{live ? tx.soFar : tx.with}</Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.clubBlock}>
         <Text style={[styles.pre, { color: theme === 'navy' ? '#F4B88A' : t.accent }]}>
-          {club ? tx.officially : tx.picked}
+          {club ? (live ? tx.forNow : tx.officially) : tx.picked}
         </Text>
         <Text style={[styles.club, { color: t.fg, fontSize: bigSize, lineHeight: bigSize * 1.04 }]} numberOfLines={2}>
           {big}
@@ -122,7 +131,7 @@ export const StoryShareCard = forwardRef<View, Props>(function StoryShareCard(
       <View style={{ flex: 1 }} />
 
       <View style={[styles.bottom, { borderTopColor: t.line }]}>
-        <Text style={[styles.ask, { color: t.fg }]}>{club ? tx.ask : tx.askPlain}</Text>
+        <Text style={[styles.ask, { color: t.fg }, live && styles.askLive]}>{live ? tx.askLive : club ? tx.ask : tx.askPlain}</Text>
         <Text style={[styles.handle, { color: t.soft }]}>@suan.app</Text>
       </View>
     </View>
@@ -233,6 +242,9 @@ const styles = StyleSheet.create({
   ask: {
     fontFamily: F.bold,
     fontSize: 15,
+  },
+  askLive: {
+    fontSize: 21,
   },
   handle: {
     fontFamily: F.bold,

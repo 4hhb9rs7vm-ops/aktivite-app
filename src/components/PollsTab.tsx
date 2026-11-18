@@ -10,6 +10,7 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -24,8 +25,10 @@ import {
   clubName,
   dayLabel,
   fetchCrowd,
+  fetchLiveResult,
   fetchPollHistory,
   getStreak,
+  inEveningWindow,
   isBeforeResults,
   istanbulToday,
   markRevealed,
@@ -44,6 +47,7 @@ import { acceptNotifAsk, canAskNotif, noteNotifAsk } from '@/lib/notifAsk';
 import { registerPushToken } from '@/lib/ask';
 import { track } from '@/lib/analytics';
 import { checkBadges } from '@/lib/badges';
+import { claimShareBonus } from '@/lib/prediction';
 
 const NAVY = '#0F2A52';
 const AMBER = '#F4B88A'; // 1.5.6: sarı yerine şeftali
@@ -138,7 +142,8 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
   const [streak, setStreak] = useState(0);
   const [sendingKey, setSendingKey] = useState<string | null>(null);
   const [askNotif, setAskNotif] = useState<'no' | 'ask' | 'ok'>('no'); // 1.5.8: cevaptan sonra bildirim izni sorusu
-  const [reveal, setReveal] = useState<{ data: PendingReveal; kicker: string } | null>(null);
+  const [reveal, setReveal] = useState<{ data: PendingReveal; kicker?: string } | null>(null);
+  const liveBusy = useRef(false); // 1.5.9: "şu ana kadar" sonucu yüklenirken ikinci dokunuş yok sayılır
   const [crowd, setCrowd] = useState<number | null>(null); // bugün 3.000+ cevap varsa eşik
   const [, setTick] = useState(0); // geri sayım için dakikada bir yeniden çiz
   const mounted = useRef(true);
@@ -197,15 +202,31 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
       return;
     }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    track('question_answered', { day: todayItem.question.day_date, option: saved, source: 'polls' });
-    setTimeout(() => checkBadges().catch(() => {}), 600);
-    const savedOption = todayItem.question.options.find((o) => o.key === saved);
-    scheduleResultNotification(todayItem.question.day_date, savedOption ? clubName(savedOption, lang) : null);
+    const lateAnswer = !isBeforeResults();
+    track('question_answered', { day: todayItem.question.day_date, option: saved, source: lateAnswer ? 'polls_late' : 'polls' });
     setItems((prev) =>
       prev ? prev.map((i) => (i.question.id === todayItem.question.id ? { ...i, myKey: saved } : i)) : prev
     );
     setStreak(await getStreak());
-    // 1.5.8: soruyu burada cevaplayana da "haber verelim mi?" sorulur (önceden yalnızca tam ekran soruda vardı)
+    if (lateAnswer) {
+      // 1.5.9: 21:00'den sonra cevaplandı; kesin sonuç hemen açılır
+      setTimeout(() => checkBadges().catch(() => {}), 2500);
+      if (todayItem.result) {
+        markRevealed(todayItem.question.day_date);
+        setReveal({
+          data: { question: todayItem.question, myKey: saved, result: todayItem.result, isYesterday: false, mode: 'final' },
+          kicker: dayLabel(todayItem.question.day_date, lang),
+        });
+      }
+      return;
+    }
+    const savedOption = todayItem.question.options.find((o) => o.key === saved);
+    scheduleResultNotification(todayItem.question.day_date, savedOption ? clubName(savedOption, lang) : null);
+    // 1.5.9: cevaptan hemen sonra "şu ana kadar" sonucu açılır (izin sorusu o ekranda).
+    // Açılamazsa (sunucu fonksiyonu yok, bağlantı yok) 1.5.8'deki gibi izin sorusu burada çıkar.
+    const opened = await openLive(todayItem.question, saved);
+    if (opened) return;
+    setTimeout(() => checkBadges().catch(() => {}), 600);
     canAskNotif()
       .then((ok) => {
         if (!ok) return;
@@ -214,6 +235,20 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
         setAskNotif('ask');
       })
       .catch(() => {});
+  }
+
+  // 1.5.9: bugünün sorusunda "şu ana kadar" sonucu
+  async function openLive(q: PollItem['question'], myKey: string): Promise<boolean> {
+    if (liveBusy.current) return false;
+    liveBusy.current = true;
+    const live = await fetchLiveResult(q).catch(() => null);
+    liveBusy.current = false;
+    if (!live || !mounted.current) return false;
+    setReveal({
+      data: { question: q, myKey, result: live.result, isYesterday: false, mode: live.enough ? 'live' : 'early' },
+      kicker: undefined,
+    });
+    return true;
   }
 
   async function onNotifYes() {
@@ -246,9 +281,28 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
     });
   }
 
-  function onRevealClose(shareUri: string | null) {
+  function onRevealClose(shareUri: string | null, shareMessage?: string) {
     setReveal(null);
-    if (!shareUri) return;
+    // Cevap bu ekranda verildiyse rozet kontrolü sonuç ekranı (ve varsa paylaşım) bittikten sonra
+    const badges = () => setTimeout(() => checkBadges().catch(() => {}), 500);
+    if (shareMessage) {
+      setTimeout(
+        () => {
+          Share.share({ message: shareMessage })
+            .then((r) => {
+              if (r.action !== Share.dismissedAction) claimShareBonus().catch(() => {});
+            })
+            .catch(() => {})
+            .finally(badges);
+        },
+        Platform.OS === 'ios' ? 1200 : 450
+      );
+      return;
+    }
+    if (!shareUri) {
+      setTimeout(badges, Platform.OS === 'ios' ? 900 : 300);
+      return;
+    }
     // Modal tamamen kapandıktan sonra paylaşma penceresi (iOS'ta modal üstünde açılmıyor)
     setTimeout(
       async () => {
@@ -285,10 +339,16 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
         </View>
         <Text style={styles.todayQuestion}>{qText}</Text>
 
-        {!item.myKey && before21 ? (
-          // Cevaplanmadı: şıklar burada
+        {!item.myKey && (before21 || (inEveningWindow() && !!item.result)) ? (
+          // Cevaplanmadı: şıklar burada (1.5.9: 21:00'den sonra da cevaplanabilir, kesin sonuç hemen açılır)
           <View style={{ gap: 8, marginTop: 14 }}>
-            <Text style={styles.hint}>{tx.pickHint}</Text>
+            <Text style={styles.hint}>
+              {before21
+                ? tx.pickHint
+                : (lang as string) === 'tr'
+                  ? 'Sonuç açıklandı. Cevapla, herkesin ne dediğini hemen gör.'
+                  : 'The result is out. Answer and see what everyone said.'}
+            </Text>
             {q.options.map((o, i) => (
               <Pressable
                 key={o.key}
@@ -319,6 +379,18 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
               <Ionicons name="time-outline" size={18} color={AMBER_FG} />
               <Text style={styles.countText}>{tx.countdown(left.h, left.m)}</Text>
             </View>
+            {/* 1.5.9: beklemeden "şu ana kadar" sonucuna bakma */}
+            <Pressable
+              onPress={() => {
+                Haptics.selectionAsync().catch(() => {});
+                if (item.myKey) openLive(q, item.myKey);
+              }}
+              style={styles.liveBtn}
+              accessibilityRole="button"
+            >
+              <Text style={styles.liveText}>{(lang as string) === 'tr' ? 'Şu ana kadar ne çıktı?' : "What's the result so far?"}</Text>
+              <Ionicons name="arrow-forward" size={18} color={NAVY} />
+            </Pressable>
             {crowd ? (
               <View style={styles.crowdRow}>
                 <Ionicons name="people" size={16} color={NAVY} />
@@ -664,6 +736,17 @@ const styles = StyleSheet.create({
     color: NAVY,
     opacity: 0.75,
   },
+  liveBtn: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 11,
+    borderRadius: 14,
+    backgroundColor: AMBER,
+  },
+  liveText: { fontFamily: 'DMSans_700Bold', fontSize: 15, color: NAVY },
   countRow: {
     marginTop: 8,
     flexDirection: 'row',

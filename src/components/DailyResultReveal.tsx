@@ -21,7 +21,7 @@ import { initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-
 import * as Haptics from 'expo-haptics';
 import { captureRef } from 'react-native-view-shot';
 import { SvgXml } from 'react-native-svg';
-import { ShareNetwork, UsersThree, X } from 'phosphor-react-native';
+import { PaperPlaneTilt, ShareNetwork, UsersThree, X } from 'phosphor-react-native';
 import type { Lang } from '@/lib/i18n';
 import {
   clubName,
@@ -45,6 +45,10 @@ import { noteResultSeen } from '@/lib/overlay';
 import { activityName } from '@/lib/i18n';
 import { getTier, TierId } from '@/lib/badges';
 import { fetchSelamSummary, SelamSummary } from '@/lib/selam';
+import { acceptNotifAsk, canAskNotif, noteNotifAsk } from '@/lib/notifAsk';
+import { hasNotificationPermission, scheduleResultNotification } from '@/lib/notifications';
+import { registerPushToken } from '@/lib/ask';
+import { questionMessage, shareLink } from '@/lib/invite';
 import {
   fetchPredictionWeeks,
   getMyPrediction,
@@ -84,6 +88,25 @@ const TEXT = {
     selamKicker: 'BUGÜN SANA',
     selamKickerY: 'DÜN SANA',
     selamTitle: (n: string) => `${n} kişi selam verdi 👋`,
+    // 1.5.9: cevaptan hemen sonra gösterilen "şu ana kadar" sonucu
+    titleLive: 'ŞU ANA KADAR',
+    titleEarly: 'İLK CEVAPLAYANLARDANSIN 🌅',
+    majorityLive: (p: number, o: string) => `Şu ana kadar %${p} senin gibi "${o}" dedi.`,
+    minorityLive: (p: number, o: string) => `Şu ana kadar sadece %${p} senin gibi "${o}" dedi.`,
+    earlyTitle: 'Sonuç şekilleniyor',
+    earlyText: (o: string) => `Cevabın: "${o}". Yeterince kişi cevaplayınca oranlar açılır; gün içinde tekrar bak.`,
+    clubPreLive: 'Şimdilik',
+    clubPreEarly: 'Kulübün:',
+    liveList: 'Şu ana kadar',
+    finalAt: "Kesin sonuç 21:00'de",
+    predLive: (o: string) => `🎯 Tahminin: "${o}"`,
+    predLiveText: (p: number) => `Kesin sonuç 21:00'de açıklanacak. Tutarsa +${p} puan.`,
+    noPredText: 'Çoğunluk akşama kadar değişebilir.',
+    askYes: "🔔 21:00'de haber ver",
+    askNo: 'Şimdi değil',
+    askOk: "✓ 21:00'de haber vereceğiz",
+    shareStory: 'Hikâyende paylaş',
+    shareFriend: 'Arkadaşına gönder',
   },
   en: {
     day: (n: number) => `Day ${n}/${SERIES_LENGTH}`,
@@ -108,14 +131,33 @@ const TEXT = {
     selamKicker: 'TODAY',
     selamKickerY: 'YESTERDAY',
     selamTitle: (n: string) => `${n} people said hi to you 👋`,
+    titleLive: 'SO FAR',
+    titleEarly: "YOU'RE AMONG THE FIRST 🌅",
+    majorityLive: (p: number, o: string) => `So far ${p}% said "${o}", just like you.`,
+    minorityLive: (p: number, o: string) => `So far only ${p}% said "${o}" like you.`,
+    earlyTitle: 'The result is taking shape',
+    earlyText: (o: string) => `Your answer: "${o}". Percentages open once enough people answer; check back later today.`,
+    clubPreLive: "For now you're in the",
+    clubPreEarly: 'Your club:',
+    liveList: 'So far',
+    finalAt: 'Final result at 9 PM',
+    predLive: (o: string) => `🎯 Your guess: "${o}"`,
+    predLiveText: (p: number) => `The final result is out at 9 PM. +${p} points if you're right.`,
+    noPredText: 'The majority can still change by tonight.',
+    askYes: '🔔 Notify me at 9 PM',
+    askNo: 'Not now',
+    askOk: "✓ We'll let you know at 9 PM",
+    shareStory: 'Share to Story',
+    shareFriend: 'Send to a friend',
   },
 };
 
 type Props = {
   data: PendingReveal;
   lang: Lang;
-  // shareUri doluysa: kapandıktan sonra bu görseli paylaş
-  onClose: (shareUri: string | null) => void;
+  // shareUri doluysa: kapandıktan sonra bu görseli paylaş.
+  // 1.5.9: shareMessage doluysa görsel yerine bu yazılı mesaj paylaşılır ("Arkadaşına gönder")
+  onClose: (shareUri: string | null, shareMessage?: string) => void;
   autoReveal?: boolean; // Anketler sekmesinden açılınca "Sonucu aç" beklemeden göster
   kicker?: string; // üstteki sarı başlığı değiştirmek için (ör. '4 Kasım')
   source?: 'gate' | 'polls'; // ölçüm için: girişte mi, Anketler sekmesinden mi açıldı
@@ -129,6 +171,10 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
 
   const tx = (lang as string) === 'tr' ? TEXT.tr : TEXT.en;
   const { question, myKey, result, isYesterday } = data;
+  // 1.5.9: 'live' = cevaptan hemen sonra "şu ana kadar" sonucu · 'early' = henüz oran yok
+  const mode = data.mode ?? 'final';
+  const live = mode !== 'final';
+  const early = mode === 'early';
   const hint = nextHint(question, lang);
   // 1.5.8: "senin grubun ne dedi" satırı (grupta en az 10 cevap varsa)
   const [group, setGroup] = useState<GroupLine | null>(null);
@@ -164,8 +210,10 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
   // Anketler sekmesinden açılınca ara ekran olmadan doğrudan sonuç düzeniyle başlar
   // 1.5.2: soruyu cevaplamamış (akşam izleyicisi) ise kendi cevabı yok; doğrudan sonuç
   const watcher = !myKey;
-  const [revealed, setRevealed] = useState(autoReveal || watcher);
+  const [revealed, setRevealed] = useState(autoReveal || watcher || live);
   const [sharing, setSharing] = useState(false);
+  // 1.5.9: canlı sonuçta bildirim izni ('ask': soruluyor · 'ok': izin var · 'no': gösterme)
+  const [askNotif, setAskNotif] = useState<'no' | 'ask' | 'ok'>('no');
   const [tier, setTier] = useState<TierId | null>(null);
   const [selam, setSelam] = useState<SelamSummary | null>(null);
   // 1.5.4: Tahmin Oyunu sonucu
@@ -200,19 +248,39 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
   let verdict: 'majority' | 'minority' | 'middle' = 'middle';
   if (myPct === maxPct && myPct > 0) verdict = 'majority';
   else if (myPct === minPct || myPct < 20) verdict = 'minority';
-  const verdictText =
-    verdict === 'majority'
+  const verdictText = live
+    ? verdict === 'minority'
+      ? tx.minorityLive(myPct, myLabel)
+      : tx.majorityLive(myPct, myLabel)
+    : verdict === 'majority'
       ? tx.majorityText(myPct, myLabel)
       : verdict === 'minority'
         ? tx.minorityText(myPct, myLabel)
         : tx.middleText(myPct, myLabel);
+  const headKicker = kicker ?? (early ? tx.titleEarly : live ? tx.titleLive : isYesterday ? tx.titleYesterday : tx.titleToday);
 
   useEffect(() => {
     Animated.timing(fadeIn, { toValue: 1, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-    track('result_shown', { day: question.day_date, source: watcher ? 'evening' : source });
+    track('result_shown', { day: question.day_date, source: live ? mode : watcher ? 'evening' : source });
     getTier().then(setTier).catch(() => {});
-    // Selam şeridi sadece bugünün ya da dünün sonucunda
-    const selamDay = question.day_date === istanbulToday() || question.day_date === istanbulYesterday();
+    if (live) {
+      // Kesin sonuç 21:00'de: izin varsa onay satırı, yoksa (ve sorulabiliyorsa) izin düğmesi
+      hasNotificationPermission()
+        .then(async (has) => {
+          if (has) {
+            setAskNotif('ok');
+            return;
+          }
+          if (await canAskNotif()) {
+            setAskNotif('ask');
+            noteNotifAsk().catch(() => {});
+            track('notif_ask_shown', { source: 'live' });
+          }
+        })
+        .catch(() => {});
+    }
+    // Selam şeridi sadece bugünün ya da dünün sonucunda (canlı sonuçta yok; selamlar ana ekranda)
+    const selamDay = !live && (question.day_date === istanbulToday() || question.day_date === istanbulYesterday());
     (selamDay ? fetchSelamSummary(question.day_date) : Promise.resolve(null))
       .then((s) => {
         setSelam(s);
@@ -223,7 +291,7 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
       getMyPrediction(question)
         .then((p) => {
           setPrediction(p);
-          if (p) {
+          if (p && !live) {
             invalidatePredictionCache();
             fetchPredictionWeeks(true)
               .then((w) => setWeekPoints(w ? w.current.points : null))
@@ -232,7 +300,7 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
         })
         .catch(() => {});
     }
-    if (autoReveal || watcher) {
+    if (autoReveal || watcher || live) {
       const timer = setTimeout(playResult, 150);
       return () => clearTimeout(timer);
     }
@@ -271,10 +339,50 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
     ]).start();
   }
 
-  function finish(uri: string | null) {
+  function finish(uri: string | null, message?: string) {
     setVisible(false);
-    noteResultSeen(); // ana ekran "peki şu an ne yapıyorsun?" satırını göstersin
-    onClose(uri);
+    noteResultSeen(live ? 'answer' : undefined); // ana ekran "peki şu an ne yapıyorsun?" satırını göstersin
+    onClose(uri, message);
+  }
+
+  // 1.5.9 "Arkadaşına gönder": soruyu soran yazılı mesaj, bağlantı içinde
+  async function shareToFriend() {
+    if (sharing) return;
+    setSharing(true);
+    Haptics.selectionAsync().catch(() => {});
+    try {
+      const link = await shareLink();
+      const msg = questionMessage({
+        question: qText,
+        answer: myLabel,
+        club,
+        pct: early ? null : myPct,
+        live,
+        url: link.url,
+        lang,
+      });
+      track('app_share', { from: 'question_message', invite: link.invite });
+      finish(null, msg);
+    } catch {
+      setSharing(false);
+    }
+  }
+
+  async function onNotifYes() {
+    Haptics.selectionAsync().catch(() => {});
+    const r = await acceptNotifAsk();
+    track('notif_ask_answer', { answer: r });
+    if (r === 'granted') {
+      setAskNotif('ok');
+      registerPushToken(true).catch(() => {});
+      scheduleResultNotification(question.day_date, club);
+    } else setAskNotif('no');
+  }
+
+  function onNotifNo() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    track('notif_ask_answer', { answer: 'later' });
+    setAskNotif('no');
   }
 
   async function share() {
@@ -312,7 +420,8 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
             dateLabel={dayLabel(question.day_date, lang)}
             club={club}
             option={myLabel}
-            pct={myPct}
+            pct={early ? null : myPct}
+            live={live}
             lang={lang}
             tier={tier}
           />
@@ -377,9 +486,7 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
                     {question.art_svg ? <SvgXml xml={question.art_svg} width="100%" height="100%" /> : null}
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.kickerSmall}>
-                      {kicker ?? (isYesterday ? tx.titleYesterday : tx.titleToday)}
-                    </Text>
+                    <Text style={styles.kickerSmall}>{headKicker}</Text>
                     <Text style={styles.questionSmall} numberOfLines={3}>
                       {qText}
                     </Text>
@@ -392,14 +499,24 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
                 >
                   <View style={styles.verdictHead}>
                     <Text style={styles.verdictTitle}>
-                      {watcher ? ((lang as string) === 'tr' ? 'Şu An’ın cevabı' : "Everyone's answer") : tx[verdict]}
+                      {early
+                        ? tx.earlyTitle
+                        : watcher
+                          ? (lang as string) === 'tr'
+                            ? 'Şu An’ın cevabı'
+                            : "Everyone's answer"
+                          : tx[verdict]}
                     </Text>
-                    <View style={styles.pctBadge}>
-                      <Text style={styles.pctBadgeText}>%{myPct}</Text>
-                    </View>
+                    {early ? null : (
+                      <View style={styles.pctBadge}>
+                        <Text style={styles.pctBadgeText}>%{myPct}</Text>
+                      </View>
+                    )}
                   </View>
                   <Text style={styles.verdictText}>
-                    {watcher
+                    {early
+                      ? tx.earlyText(myLabel)
+                      : watcher
                       ? (lang as string) === 'tr'
                         ? `Çoğunluk "${myLabel}" dedi.`
                         : `Most people said "${myLabel}".`
@@ -409,17 +526,49 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
                     <View style={styles.clubBox}>
                       <Text style={styles.clubLine} numberOfLines={2}>
                         <Text style={styles.clubPre}>
-                          {watcher ? ((lang as string) === 'tr' ? 'Kazanan kulüp:' : 'Winning club:') : tx.clubPre}{' '}
+                          {early
+                            ? tx.clubPreEarly
+                            : live
+                              ? tx.clubPreLive
+                              : watcher
+                                ? (lang as string) === 'tr'
+                                  ? 'Kazanan kulüp:'
+                                  : 'Winning club:'
+                                : tx.clubPre}{' '}
                         </Text>
                         <Text style={styles.clubName}>{club}</Text>
-                        {tx.clubPost && !watcher ? <Text style={styles.clubPre}> {tx.clubPost}</Text> : null}
+                        {tx.clubPost && !watcher && !early ? <Text style={styles.clubPre}> {tx.clubPost}</Text> : null}
                       </Text>
                     </View>
                   ) : null}
                 </Animated.View>
 
+                {/* 1.5.9: canlı sonuçta tahmin henüz sonuçlanmadı; kesin sonuç 21:00'de, izin burada sorulur */}
+                {live ? (
+                  <Animated.View style={[styles.predCard, styles.predCardHit, { opacity: verdictAnim }]}>
+                    <Text style={styles.predTitle} numberOfLines={2}>
+                      {predOption ? tx.predLive(optionLabel(predOption, lang)) : tx.finalAt}
+                    </Text>
+                    <Text style={styles.predText}>{predOption ? tx.predLiveText(POINTS_HIT) : tx.noPredText}</Text>
+                    {askNotif === 'ask' ? (
+                      <View style={styles.askRow}>
+                        <Pressable onPress={onNotifYes} style={styles.askYes} accessibilityRole="button">
+                          <Text style={styles.askYesText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+                            {tx.askYes}
+                          </Text>
+                        </Pressable>
+                        <Pressable onPress={onNotifNo} style={styles.askNo} accessibilityRole="button" hitSlop={8}>
+                          <Text style={styles.askNoText}>{tx.askNo}</Text>
+                        </Pressable>
+                      </View>
+                    ) : askNotif === 'ok' ? (
+                      <Text style={styles.askOk}>{tx.askOk}</Text>
+                    ) : null}
+                  </Animated.View>
+                ) : null}
+
                 {/* 1.5.4: Tahmin sonucu */}
-                {!watcher && predOption ? (
+                {!live && !watcher && predOption ? (
                   <Animated.View style={[styles.predCard, predHit && styles.predCardHit, { opacity: verdictAnim }]}>
                     <Text style={styles.predTitle}>
                       {predHit
@@ -449,7 +598,7 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
                 ) : null}
 
                 {/* 1.5.6: yarının sorusundan ipucu (yalnızca bugünün sonucunda; soru açık edilmez) */}
-                {hint && !isYesterday ? (
+                {hint && !isYesterday && !live ? (
                   <Animated.View style={[styles.hintCard, { opacity: verdictAnim }]}>
                     <Text style={styles.hintEmoji}>👀</Text>
                     <View style={{ flex: 1 }}>
@@ -472,15 +621,21 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
                   <Animated.View style={{ opacity: verdictAnim, marginTop: 12 }}>
                     <Pressable onPress={share} style={styles.shareBtn} accessibilityRole="button" disabled={sharing}>
                       <ShareNetwork size={22} color={NAVY} weight="bold" />
-                      <Text style={styles.shareText}>{tx.share}</Text>
+                      <Text style={styles.shareText}>{live ? tx.shareStory : tx.share}</Text>
+                    </Pressable>
+                    {/* 1.5.9: yazılı mesajla gönderme (soruyu arkadaşına sorar, bağlantı içinde) */}
+                    <Pressable onPress={shareToFriend} style={styles.friendBtn} accessibilityRole="button" disabled={sharing}>
+                      <PaperPlaneTilt size={19} color="#ffffff" weight="bold" />
+                      <Text style={styles.friendText}>{tx.shareFriend}</Text>
                     </Pressable>
                   </Animated.View>
                 )}
 
-                {/* 3) Tüm cevaplar en altta */}
+                {/* 3) Tüm cevaplar en altta (oran henüz yoksa hiç gösterilmez) */}
+                {early ? null : (
                 <Animated.View style={[styles.listBox, { opacity: listAnim }]}>
                   <View style={styles.listHead}>
-                    <Text style={styles.listTitle}>{tx.allAnswers}</Text>
+                    <Text style={styles.listTitle}>{live ? tx.liveList : tx.allAnswers}</Text>
                     {totalText ? (
                       <View style={styles.totalRow}>
                         <UsersThree size={15} color="rgba(255,255,255,0.7)" weight="bold" />
@@ -508,6 +663,7 @@ export function DailyResultReveal({ data, lang, onClose, autoReveal = false, kic
                     })}
                   </View>
                 </Animated.View>
+                )}
               </>
             )}
           </ScrollView>
@@ -522,6 +678,24 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: NAVY,
   },
+  askRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
+  askYes: { flex: 1, backgroundColor: AMBER, borderRadius: 14, paddingVertical: 11, paddingHorizontal: 10, alignItems: 'center' },
+  askYesText: { fontFamily: F.bold, fontSize: 15, color: NAVY },
+  askNo: { paddingVertical: 11, paddingHorizontal: 10 },
+  askNoText: { fontFamily: F.bold, fontSize: 13.5, color: 'rgba(255,255,255,0.75)' },
+  askOk: { fontFamily: F.bold, fontSize: 13.5, color: '#ffffff', marginTop: 8 },
+  friendBtn: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 13,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  friendText: { fontFamily: F.bold, fontSize: 15.5, color: '#ffffff' },
   predCard: {
     marginTop: 12,
     paddingVertical: 12,

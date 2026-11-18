@@ -19,6 +19,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -37,8 +38,12 @@ import { Lang, loadLang } from '@/lib/i18n';
 import {
   clubName,
   DailyQuestion,
+  fetchLiveResult,
+  fetchResults,
   fetchTodayQuestion,
   findPendingReveal,
+  inEveningWindow,
+  isBeforeResults,
   gateAllowedToday,
   getAnsweredDayCount,
   getMyAnswer,
@@ -61,7 +66,7 @@ import { track } from '@/lib/analytics';
 import { isOverlayBusy, setOverlayBusy, whenOverlayFree } from '@/lib/overlay';
 import { isFirstDay } from '@/lib/firstRun';
 import { checkBadges } from '@/lib/badges';
-import { POINTS_HIT, pointsChanged, submitPrediction } from '@/lib/prediction';
+import { claimShareBonus, POINTS_HIT, pointsChanged, submitPrediction } from '@/lib/prediction';
 
 // index.tsx'teki açılış ekranı 3,5 sn sürüyor. Kart, ana ekran kısa bir an göründükten sonra gelsin.
 const SHOW_DELAY_MS = 4300;
@@ -90,6 +95,9 @@ const TEXT = {
     label: 'GÜNÜN SORUSU',
     day: (n: number) => (n === 1 ? 'İlk günün' : `${n}. günün`),
     hint: "Herkese aynı soru. Sonuç akşam 21:00'de.",
+    hintLate: 'Sonuç açıklandı. Cevapla, herkesin ne dediğini hemen gör.',
+    introLate: 'Günün sorusu seni bekliyor',
+    doneLate: 'Sonuca Anketler sekmesinden bakabilirsin.',
     askTitle: "Sonuç 21:00'de açıklanacak",
     askText: 'Çoğunluk ne dedi, tahminin tuttu mu? Açıklanınca sana haber verelim.',
     askYes: 'Haber ver',
@@ -121,6 +129,9 @@ const TEXT = {
     label: 'QUESTION OF THE DAY',
     day: (n: number) => (n === 1 ? 'Your first day' : `Your day ${n}`),
     hint: 'Same question for everyone. Results at 9 pm.',
+    hintLate: 'The result is out. Answer and see what everyone said.',
+    introLate: "Today's question is waiting",
+    doneLate: 'You can see the result in the Polls tab.',
     askTitle: 'Results are out at 9 PM',
     askText: "What did most people say, and did your guess hit? We'll let you know when it's out.",
     askYes: 'Notify me',
@@ -157,10 +168,15 @@ export function DailyQuestionGate() {
   // Açıkken rozet kutlaması beklesin (iPhone'da iki pencere çakışıp ekranı kilitliyordu)
   const [reveal, setReveal] = useState<PendingReveal | null>(null);
   // 1.5.2: sonuç ekranı açıkken de başka pencereler (Kampüs Ligi, rozet) beklesin
+  // 1.5.9: soru kartı kapanıp sonuç ekranı açılırken araya başka pencere (rozet) girmesin
+  const [handoff, setHandoff] = useState(false);
+  const nextReveal = useRef<PendingReveal | null>(null);
+  // 1.5.9: 21:00'den sonra sorulan soru (tahmin adımı yok, cevaptan sonra kesin sonuç)
+  const [late, setLate] = useState(false);
   useEffect(() => {
-    setOverlayBusy('gate', visible || !!reveal);
+    setOverlayBusy('gate', visible || !!reveal || handoff);
     return () => setOverlayBusy('gate', false);
-  }, [visible, reveal]);
+  }, [visible, reveal, handoff]);
   const [question, setQuestion] = useState<DailyQuestion | null>(null);
   const [lang, setLang] = useState<Lang>('tr');
   const [phase, setPhase] = useState<Phase>('question');
@@ -188,6 +204,11 @@ export function DailyQuestionGate() {
     checking.current = true;
     try {
       const l: Lang = (await loadLang()) ?? 'tr';
+      // 1.5.9: 21:00'den sonra bugünün sorusu cevaplanmadıysa önce soru sorulur (geç cevap).
+      // Sorulamıyorsa ("Bugün geç" denmiş, bugün yeterince gösterilmiş) eski akış: sonuç izleyici olarak görünür.
+      if (!TEST_MODE && !isBeforeResults() && inEveningWindow()) {
+        if (await showQuestionIfNeeded(l, true)) return;
+      }
       let pending = await findPendingReveal(l, TEST_MODE);
       // 1.5.4 (26): İlk gün, cevap vermediği bir sorunun sonucunu gösterme (yeni kullanıcıya fazla pencere)
       if (pending && !pending.myKey && !TEST_MODE && (await isFirstDay())) pending = null;
@@ -214,12 +235,14 @@ export function DailyQuestionGate() {
     }
   }
 
-  async function showQuestionIfNeeded(l: Lang) {
-    if (!TEST_MODE && !(await gateAllowedToday())) return;
+  // Dönen değer: soru gösterilecekse true
+  async function showQuestionIfNeeded(l: Lang, isLate = false): Promise<boolean> {
+    if (!TEST_MODE && !(await gateAllowedToday(isLate))) return false;
     const q = await fetchTodayQuestion();
-    if (!q) return;
-    if (!questionText(q, l)) return; // bu dilde soru yok (ör. Korece): hiç gösterme
-    if (!TEST_MODE && (await getMyAnswer(q))) return; // bugün zaten cevaplamış
+    if (!q) return false;
+    if (!questionText(q, l)) return false; // bu dilde soru yok (ör. Korece): hiç gösterme
+    if (!TEST_MODE && (await getMyAnswer(q))) return false; // bugün zaten cevaplamış
+    setLate(isLate);
     setStreak(await getStreak());
     setPersonalDay((await getAnsweredDayCount()) + 1);
     setLang(l);
@@ -233,17 +256,24 @@ export function DailyQuestionGate() {
       if (visibleRef.current) return;
       open();
       noteGateShown().catch(() => {});
-      track('question_shown', { day: q.day_date, source: 'gate' });
+      track('question_shown', { day: q.day_date, source: isLate ? 'gate_late' : 'gate' });
     }, 'gate');
+    return true;
   }
 
   // Sonuç ekranı kapandı. Paylaş denildiyse modal tamamen kapandıktan sonra paylaşma penceresi,
   // ardından (21:00'den önceyse ve cevaplanmadıysa) bugünün sorusu.
-  function onRevealClose(shareUri: string | null) {
+  function onRevealClose(shareUri: string | null, shareMessage?: string) {
     const l = lang;
     setReveal(null);
     visibleRef.current = false;
+
     const next = () => {
+      // 1.5.9: cevap bu oturumda verildiyse rozet kontrolü sonuç ekranı (ve varsa paylaşım) bittikten sonra
+      if (answeredNow.current) {
+        answeredNow.current = false;
+        setTimeout(() => checkBadges().catch(() => {}), 400);
+      }
       setTimeout(() => {
         if (checking.current || visibleRef.current) return;
         checking.current = true;
@@ -254,8 +284,24 @@ export function DailyQuestionGate() {
           });
       }, 700);
     };
+    if (shareMessage) {
+      // "Arkadaşına gönder": yazılı mesaj (bağlantı içinde). Pencere tamamen kapandıktan sonra açılır.
+      setTimeout(
+        () => {
+          Share.share({ message: shareMessage })
+            .then((r) => {
+              if (r.action !== Share.dismissedAction) claimShareBonus().catch(() => {});
+            })
+            .catch(() => {})
+            .finally(next);
+        },
+        Platform.OS === 'ios' ? 1200 : 450
+      );
+      return;
+    }
     if (!shareUri) {
-      next();
+      // Sonuç penceresi tamamen kapansın (iPhone'da kapanırken açılan pencere görünmüyor)
+      setTimeout(next, Platform.OS === 'ios' ? 500 : 150);
       return;
     }
     setTimeout(
@@ -313,8 +359,21 @@ export function DailyQuestionGate() {
         useNativeDriver: true,
       }),
     ]).start(() => {
-      visibleRef.current = false;
+      const next = nextReveal.current;
+      nextReveal.current = null;
+      visibleRef.current = !!next;
       setVisible(false);
+      if (next) {
+        // 1.5.9: soru kartı kapandı, sonuç ekranı açılır. iPhone'da iki pencere üst üste açılamadığı için kısa bekleme.
+        setTimeout(
+          () => {
+            setReveal(next);
+            setHandoff(false);
+          },
+          Platform.OS === 'ios' ? 450 : 120
+        );
+        return;
+      }
       // Cevap verildiyse kart kapandıktan sonra rozet kontrolü (ör. 7 gün → Daimi Üye kutlaması)
       if (answeredNow.current) {
         answeredNow.current = false;
@@ -346,12 +405,26 @@ export function DailyQuestionGate() {
       return;
     }
     setPicked(saved); // daha önce başka şık seçildiyse ekranda o görünsün
-    track('question_answered', { day: question.day_date, option: saved, source: 'gate' });
+    track('question_answered', { day: question.day_date, option: saved, source: late ? 'gate_late' : 'gate' });
     answeredNow.current = true;
     const savedOption = question.options.find((o) => o.key === saved);
-    scheduleResultNotification(question.day_date, savedOption ? clubName(savedOption, lang) : null); // 21:00 bildirimi
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     setStreak(await getStreak()); // telefondaki cevap geçmişinden yeniden say (aynı gün iki kez sayılmaz)
+    if (late) {
+      // 1.5.9: 21:00'den sonra cevaplandı. Tahmin yok; kesin sonuç hemen gösterilir.
+      setAnswer(saved);
+      pointsChanged();
+      const result = await fetchResults(question).catch(() => null);
+      if (result) {
+        await markRevealed(question.day_date);
+        openReveal({ question, myKey: saved, result, isYesterday: false, mode: 'final' });
+      } else {
+        setPicked(saved);
+        showDone();
+      }
+      return;
+    }
+    scheduleResultNotification(question.day_date, savedOption ? clubName(savedOption, lang) : null); // 21:00 bildirimi
     // 1.5.4: önce tahmin adımı ("Sence çoğunluk ne dedi?"), sonra tamam kartı
     setAnswer(saved);
     setPicked(null);
@@ -359,9 +432,32 @@ export function DailyQuestionGate() {
     pointsChanged(); // ana ekrandaki 🎯 puan hapı yenilensin
   }
 
+  // 1.5.9: soru kartını kapat, ardından sonuç ekranını aç
+  function openReveal(data: PendingReveal) {
+    nextReveal.current = data;
+    setHandoff(true);
+    close();
+  }
+
+  // 1.5.9: cevap (ve tahmin) tamam. "Şu ana kadar" sonucu alınabiliyorsa sonuç ekranı açılır;
+  // alınamıyorsa (sunucu fonksiyonu yok, bağlantı yok) eski "cevabın kaydedildi" kartı gösterilir.
+  async function finishAnswer(myKey: string | null) {
+    if (!question || !myKey) {
+      showDone();
+      return;
+    }
+    const live = await fetchLiveResult(question).catch(() => null);
+    if (!live) {
+      setPicked(myKey);
+      showDone();
+      return;
+    }
+    openReveal({ question, myKey, result: live.result, isYesterday: false, mode: live.enough ? 'live' : 'early' });
+  }
+
   function showDone() {
     // 1.5.6: bildirim izni yoksa tam bu anda sorulur ("Sonuç 21:00'de açıklanacak")
-    if (answeredNow.current) {
+    if (answeredNow.current && !late) {
       canAskNotif()
         .then((ok) => {
           if (!ok) return;
@@ -384,14 +480,15 @@ export function DailyQuestionGate() {
     const saved = await submitPrediction(question, key);
     // Tahmin gönderilemese de akış durmasın; tamam kartında tahmin satırı görünmez
     setPrediction(saved);
-    setPicked(answer);
-    showDone();
+    await finishAnswer(answer);
   }
 
-  function skipPrediction() {
+  async function skipPrediction() {
+    if (phase !== 'predict') return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    setPicked(answer);
-    showDone();
+    setPicked(null);
+    setPhase('predicting');
+    await finishAnswer(answer);
   }
 
   async function onNotifYes() {
@@ -440,7 +537,15 @@ export function DailyQuestionGate() {
   }
 
   if (reveal) {
-    return <DailyResultReveal data={reveal} lang={lang} onClose={onRevealClose} source="gate" />;
+    return (
+      <DailyResultReveal
+        data={reveal}
+        lang={lang}
+        onClose={onRevealClose}
+        source="gate"
+        autoReveal={reveal.mode === 'final' && answeredNow.current}
+      />
+    );
   }
 
   if (!visible || !question) return null;
@@ -468,7 +573,7 @@ export function DailyQuestionGate() {
               <View style={[styles.introIcon, predicting && styles.introIconPredict]}>
                 {predicting ? <Text style={{ fontSize: 20 }}>🎯</Text> : <ChatCircleDots size={23} color={AMBER_FG} weight="duotone" />}
               </View>
-              <Text style={styles.intro}>{predicting ? tx.predictIntro : tx.intro}</Text>
+              <Text style={styles.intro}>{predicting ? tx.predictIntro : late ? tx.introLate : tx.intro}</Text>
               {personalDay > 0 && !predicting ? (
                 <View style={styles.dayPill}>
                   <Text style={styles.dayPillText}>{tx.day(personalDay)}</Text>
@@ -501,7 +606,7 @@ export function DailyQuestionGate() {
                 <Text style={styles.label}>{tx.label}</Text>
               </View>
               <Text style={styles.question}>{qText}</Text>
-              <Text style={styles.hint}>{tx.hint}</Text>
+              <Text style={styles.hint}>{late ? tx.hintLate : tx.hint}</Text>
             </View>
           )}
 
@@ -510,7 +615,7 @@ export function DailyQuestionGate() {
               <CheckCircle size={compact ? 34 : 44} color={AMBER_FG} weight="fill" />
               <Text style={styles.doneTitle}>{tx.doneTitle}</Text>
               {pickedOption ? <Text style={styles.donePicked}>{optionLabel(pickedOption, lang)}</Text> : null}
-              <Text style={styles.doneText}>{club ? tx.doneClub(club) : tx.doneGeneric}</Text>
+              <Text style={styles.doneText}>{late ? tx.doneLate : club ? tx.doneClub(club) : tx.doneGeneric}</Text>
               {answeredNow.current ? <Text style={styles.earned}>{tx.earned}</Text> : null}
               {predictionOption ? (
                 <View style={styles.predictionRow}>

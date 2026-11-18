@@ -6,6 +6,7 @@
 // CampusLeagueCard (Ben sekmesi): okulun bu haftaki durumu ve Pazartesi–Salı geçen haftanın sıraları.
 // Ekranlar Günün Sorusu ve rozet kutlamasıyla çakışmasın diye overlay sırası kullanılır.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -30,6 +31,8 @@ import {
   CampusRanks,
   CampusStatus,
   ensureCampusState,
+  CampusPoints,
+  fetchCampusPoints,
   fetchCampusStatus,
   fetchCampusTop,
   hasConsent,
@@ -788,6 +791,7 @@ export function CampusLeagueCard({ me, lang }: { me: Me; lang: Lang }) {
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [top, setTop] = useState<string[]>([]);
+  const [pts, setPts] = useState<CampusPoints | null>(null); // 1.5.9: Puan Ligi
 
   const load = useCallback(async () => {
     if (!school) return;
@@ -799,6 +803,9 @@ export function CampusLeagueCard({ me, lang }: { me: Me; lang: Lang }) {
     setLoading(false);
     setFailed(!st);
     setStatus(st);
+    fetchCampusPoints()
+      .then(setPts)
+      .catch(() => {});
     // Geçen haftanın ilk 3'ü yalnızca "listeye giremedi" kartında gösterilir
     if (st && !st.lastListed && st.lastPlayed && isMondayOrTuesday()) {
       fetchCampusTop()
@@ -916,6 +923,9 @@ export function CampusLeagueCard({ me, lang }: { me: Me; lang: Lang }) {
     }
   }
 
+  // 1.5.9: haftanın geri kalanında Puan Ligi kartı (veri yoksa aşağıdaki eski kart)
+  if (pts) return <CampusPointsView data={pts} lang={lang} call={call} />;
+
   const early = isEarly(status);
   const title = status.listed
     ? `✅ ${lang === 'tr' ? `${s} listede` : `${s} is on the list`}`
@@ -948,8 +958,119 @@ export function CampusLeagueCard({ me, lang }: { me: Me; lang: Lang }) {
   );
 }
 
+// 1.5.9: Puan Ligi kartı. Bu hafta okuluna kazandırdığın puan + kişi başı ortalamaya göre ilk okullar.
+// Okul 5 kişinin altındaysa sıralama yerine ilerleme çubuğu ve davet.
+function fmtAvg(n: number, lang: Lang): string {
+  return Math.round(n).toLocaleString(lang === 'tr' ? 'tr-TR' : 'en-US');
+}
+export function CampusPointsView({ data, lang, call }: { data: CampusPoints; lang: Lang; call?: ReactNode }) {
+  const tr = lang === 'tr';
+  const s = shortSchool(data.university);
+  const pointsText = data.myPoints.toLocaleString(tr ? 'tr-TR' : 'en-US');
+  const ranked = data.rank !== null;
+  // İlk üç kutu; okulun ilk üçte değilse üçüncü kutunun yerine kendi sıran
+  const boxes = data.top.map((t, i) => ({ ...t, place: i + 1 }));
+  const mineInTop = boxes.some((b) => b.university === data.university);
+  if (ranked && !mineInTop && boxes.length > 0) {
+    const own = { university: data.university, avg: data.avg, people: data.people, place: data.rank as number };
+    if (boxes.length >= 3) boxes[2] = own;
+    else boxes.push(own);
+  }
+  const leader = data.top[0];
+  const gap = leader && ranked ? Math.max(0, Math.round(leader.avg - data.avg)) : 0;
+  const missing = Math.max(0, data.need - data.people);
+  return (
+    <View style={[styles.card, { backgroundColor: '#2A1F3D' }]}>
+      <Text style={styles.cardKicker}>{tr ? '🎯 BU HAFTA · PUAN LİGİ' : '🎯 THIS WEEK · POINTS LEAGUE'}</Text>
+      <Text style={[styles.cardTitle, { fontSize: 18, marginTop: 6 }]} numberOfLines={2}>
+        {tr ? `${s}: ` : `${s}: `}
+        <Text style={{ color: AMBER }}>{tr ? `${pointsText} puan` : `${pointsText} points`}</Text>
+        {tr ? ' kazandırdın' : ' from you'}
+      </Text>
+      {ranked ? (
+        <>
+          <View style={styles.topRow}>
+            {boxes.map((b) => {
+              const mine = b.university === data.university;
+              return (
+                <View key={b.university} style={[styles.ptsBox, mine && { backgroundColor: AMBER }]}>
+                  <Text style={[styles.topText, mine && { color: NAVY }]} numberOfLines={1}>
+                    {b.place <= 3 ? ['🥇', '🥈', '🥉'][b.place - 1] : `${b.place}.`} {tinySchool(b.university)}
+                  </Text>
+                  <Text style={[styles.ptsBoxSub, mine && { color: '#5A3A1E' }]} numberOfLines={1}>
+                    {tr ? `kişi başı ${fmtAvg(b.avg, lang)}` : `${fmtAvg(b.avg, lang)} per person`}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+          <Text style={[styles.cardSub, { marginTop: 12 }]}>
+            {data.rank === 1
+              ? tr
+                ? 'Okulun birinci sırada. Her cevap, her an ve her doğru tahmin okuluna yazılıyor.'
+                : 'Your school is in first place. Every answer, moment and correct guess counts for it.'
+              : tr
+                ? `Okulun ${data.rank}. sırada. Birinciliğe kişi başı ${gap} puan var; her cevap, her an ve her doğru tahmin okuluna yazılıyor.`
+                : `Your school is #${data.rank}. ${gap} points per person behind first; every answer, moment and correct guess counts.`}
+          </Text>
+        </>
+      ) : (
+        <>
+          <View style={[styles.lbar, styles.lbarDark]}>
+            <View
+              style={[
+                styles.lbarFill,
+                { width: `${Math.min(100, Math.round((data.people / Math.max(1, data.need)) * 100))}%`, backgroundColor: AMBER },
+              ]}
+            />
+          </View>
+          <View style={styles.cardRow}>
+            <Text style={styles.cardSub}>
+              {tr
+                ? `Sıralamaya girmek için ${data.need} kişi gerek. Şu an ${data.people} kişisiniz, ${missing} arkadaşını çağır.`
+                : `${data.need} people are needed to be ranked. You're ${data.people} now; invite ${missing} more.`}
+            </Text>
+            {call ?? null}
+          </View>
+        </>
+      )}
+    </View>
+  );
+}
+
+// Ana ekrandaki puan panelinde aynı kart (kendi verisini çeker; veri yoksa hiçbir şey göstermez)
+export function CampusPointsHost({ lang, style }: { lang: Lang; style?: object }) {
+  const [data, setData] = useState<CampusPoints | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetchCampusPoints()
+      .then((d) => {
+        if (alive) setData(d);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (!data) return null;
+  return (
+    <View style={style}>
+      <CampusPointsView data={data} lang={lang} />
+    </View>
+  );
+}
+
 // ======================================================================== stiller
 const styles = StyleSheet.create({
+  ptsBox: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 11,
+    paddingVertical: 7,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+  },
+  ptsBoxSub: { fontFamily: F.regular, fontSize: 10.5, color: '#C9C3DD', marginTop: 1 },
   // A1
   askRoot: { flex: 1, backgroundColor: NAVY, paddingHorizontal: 24 },
   askBody: { flex: 1, alignItems: 'center' },

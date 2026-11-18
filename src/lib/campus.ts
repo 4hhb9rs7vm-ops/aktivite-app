@@ -265,6 +265,44 @@ export async function fetchCampusTop(): Promise<string[]> {
   }
 }
 
+// 1.5.9: Puan Ligi. Bu hafta kazanılan puanlar okula yazılır; sıralama kişi başı ortalamaya göre,
+// en az 5 kişilik okullar arasında. Okul yoksa ya da veri alınamazsa null (kart hiç gösterilmez).
+export type CampusPoints = {
+  university: string;
+  myPoints: number;
+  people: number;
+  avg: number;
+  rank: number | null; // okul 5 kişinin altındaysa null
+  need: number;
+  top: { university: string; avg: number; people: number }[];
+};
+export async function fetchCampusPoints(): Promise<CampusPoints | null> {
+  try {
+    if (!(await ensureSession())) return null;
+    const { data, error } = await supabase.rpc('get_campus_points');
+    if (error || !data || typeof data !== 'object') return null;
+    const d = data as any;
+    if (typeof d.university !== 'string' || !d.university) return null;
+    const top = Array.isArray(d.top)
+      ? d.top
+          .filter((x: any) => x && typeof x.university === 'string')
+          .map((x: any) => ({ university: String(x.university), avg: Number(x.avg) || 0, people: Number(x.people) || 0 }))
+          .slice(0, 3)
+      : [];
+    return {
+      university: d.university,
+      myPoints: Number(d.my_points) || 0,
+      people: Math.max(1, Number(d.people) || 1),
+      avg: Number(d.avg) || 0,
+      rank: typeof d.rank === 'number' && d.rank > 0 ? d.rank : null,
+      need: Number(d.need) || 5,
+      top,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------- yerel durum
 type CampusState = { uni: string; day: string; lockShown: boolean; resultWeek: string };
 

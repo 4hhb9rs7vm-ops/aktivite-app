@@ -32,6 +32,7 @@ import {
 import { awardBadges, BADGES } from '@/lib/badges';
 import { istanbulToday } from '@/lib/dailyQuestion';
 import { DOWNLOAD_URL } from '@/lib/campus';
+import { CampusPointsHost } from '@/components/CampusLeague';
 import { celebratedThisSession, noteCelebration, setOverlayBusy, whenOverlayFree } from '@/lib/overlay';
 import { isFirstDay, isNewUser } from '@/lib/firstRun';
 import { track } from '@/lib/analytics';
@@ -378,6 +379,9 @@ export function PredictionSheet({
                 })}
               </View>
             </View>
+
+            {/* 1.5.9: Puan Ligi. Okulu olan kullanıcıda puanın okula katkısı (veri yoksa görünmez) */}
+            <CampusPointsHost lang={T ? 'tr' : 'en'} style={{ marginTop: 12 }} />
 
             {/* Seri */}
             <View style={styles.card}>

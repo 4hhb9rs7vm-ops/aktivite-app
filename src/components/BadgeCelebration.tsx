@@ -7,7 +7,7 @@ import * as Haptics from 'expo-haptics';
 import * as Sharing from 'expo-sharing';
 import { captureRef } from 'react-native-view-shot';
 import { Lang, loadLang } from '@/lib/i18n';
-import { BADGE_BY_ID, BadgeId, onNewBadges } from '@/lib/badges';
+import { BADGE_BY_ID, BadgeId, isRetroBadge, onNewBadges, retroDoneText } from '@/lib/badges';
 import { track } from '@/lib/analytics';
 import { noteCelebration, setOverlayBusy, whenOverlayFree } from '@/lib/overlay';
 import { isFirstDay } from '@/lib/firstRun';
@@ -169,7 +169,7 @@ export function BadgeCelebration() {
             </View>
           </Animated.View>
           <Text style={styles.name}>{tr ? b.name.tr : b.name.en}</Text>
-          <Text style={styles.how}>{tr ? b.done.tr : b.done.en}</Text>
+          <Text style={styles.how}>{(isRetroBadge(b.id) && retroDoneText(b.id, lang)) || (tr ? b.done.tr : b.done.en)}</Text>
           {b.reward ? <Text style={styles.reward}>{tr ? b.reward.tr : b.reward.en}</Text> : null}
           <Pressable onPress={share} style={styles.shareBtn} accessibilityRole="button">
             <Text style={styles.shareText}>{tx.share}</Text>

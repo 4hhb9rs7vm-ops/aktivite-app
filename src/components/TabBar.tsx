@@ -1,4 +1,4 @@
-// İnce alt menü: Şu An · Anketler · Rozetler · Arkadaşlar · Ben
+// İnce alt menü: Şu An · Anketler · Mesajlar · Arkadaşlar · Ben (1.6.0: Rozetler, Mesaj kutusunun içinde)
 // Her sekmenin kendi rengi var (uygulamanın paletinden): boşta renkli çizgi simge,
 // seçilince dolu simge + aynı rengin açık tonunda kapsül. Dokununca simge hafifçe zıplar.
 import { useEffect, useRef, useState } from 'react';
@@ -7,8 +7,9 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { Lang } from '@/lib/i18n';
 import { onPollsChanged, pollsBadge } from '@/lib/dailyQuestion';
+import { inboxUnread, onInboxChanged } from '@/lib/inbox';
 
-export type TabId = 'now' | 'friends' | 'polls' | 'badges' | 'me';
+export type TabId = 'now' | 'friends' | 'polls' | 'badges' | 'inbox' | 'me';
 
 export const TAB_BAR_HEIGHT = 64;
 
@@ -18,6 +19,7 @@ const LABELS: Record<TabId, { tr: string; en: string }> = {
   now: { tr: 'Şu An', en: 'Now' },
   polls: { tr: 'Anketler', en: 'Polls' },
   badges: { tr: 'Rozetler', en: 'Badges' },
+  inbox: { tr: 'Mesajlar', en: 'Inbox' },
   friends: { tr: 'Arkadaşlar', en: 'Friends' },
   me: { tr: 'Ben', en: 'Me' },
 };
@@ -30,6 +32,7 @@ const STYLE: Record<
   now: { on: 'flash', off: 'flash-outline', color: '#4F46E5', bg: '#E6E9FF' }, // marka moru
   polls: { on: 'chatbubbles', off: 'chatbubbles-outline', color: '#D97706', bg: '#FFF1D6' }, // anket sarısı
   badges: { on: 'ribbon', off: 'ribbon-outline', color: '#DB2777', bg: '#FCE7F3' }, // rozet pembesi
+  inbox: { on: 'mail', off: 'mail-outline', color: '#DB2777', bg: '#FCE7F3' }, // pembe (eski Rozetler rengi)
   friends: { on: 'people', off: 'people-outline', color: '#0E9F6E', bg: '#DDF5EA' }, // yeşil
   me: { on: 'person-circle', off: 'person-circle-outline', color: '#0F2A52', bg: '#E4EAF3' }, // lacivert
 };
@@ -88,15 +91,39 @@ export function TabBar({
   lang: Lang;
   showFriends: boolean;
   showPolls?: boolean; // Anketler sekmesi (seri başlayınca ve çevirisi olan dillerde)
-  showBadges?: boolean; // Rozetler sekmesi (Anketler ile aynı kural)
+  showBadges?: boolean; // 1.6.0'dan beri kullanılmıyor: Rozetler, Mesaj kutusunun içinde
   bottomInset: number;
 }) {
-  // Sıra: Şu An · Anketler · Rozetler · Arkadaşlar · Ben (Arkadaşlar ve Ben yan yana)
+  // Sıra: Şu An · Anketler · Mesajlar · Arkadaşlar · Ben (Arkadaşlar ve Ben yan yana)
   const tabs: TabId[] = ['now'];
   if (showPolls) tabs.push('polls');
-  if (showBadges) tabs.push('badges');
+  tabs.push('inbox');
   if (showFriends) tabs.push('friends');
   tabs.push('me');
+  void showBadges;
+
+  // 1.6.0: Mesajlar sekmesinde nokta: son açılıştan beri yeni tepki ya da sorularına cevap geldi
+  const [inboxDot, setInboxDot] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const refresh = () => {
+      inboxUnread()
+        .then((v) => alive && setInboxDot(v))
+        .catch(() => {});
+    };
+    refresh();
+    const off = onInboxChanged(refresh);
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') refresh();
+    });
+    const timer = setInterval(refresh, 3 * 60 * 1000);
+    return () => {
+      alive = false;
+      off();
+      sub.remove();
+      clearInterval(timer);
+    };
+  }, [active]);
 
   // Anketler sekmesinde sarı nokta: bugünün sorusu bekliyor ya da sonuç açıklandı
   const [pollsDot, setPollsDot] = useState(false);
@@ -136,7 +163,7 @@ export function TabBar({
           id={t}
           on={t === active}
           label={LABELS[t][lang]}
-          dot={t === 'polls' && pollsDot && t !== active}
+          dot={t !== active && ((t === 'polls' && pollsDot) || (t === 'inbox' && inboxDot))}
           onPress={() => onChange(t)}
         />
       ))}

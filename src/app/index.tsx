@@ -80,6 +80,7 @@ import {
 import { ensureSession, supabase } from '@/lib/supabase';
 import {
   activityName,
+  registerActivityNames,
   COUNTRY_TR,
   countryFromRegion,
   countryLabel,
@@ -139,8 +140,12 @@ import { ActivityInfo, FriendsTab } from '@/components/FriendsTab';
 import { PollsTab } from '@/components/PollsTab';
 import { istanbulToday, pollsVisible } from '@/lib/dailyQuestion';
 import { track } from '@/lib/analytics';
-import { BadgesTab } from '@/components/BadgesTab';
 import { SelamBanner, SelamCard } from '@/components/SelamCard';
+import { OptionalSlot } from '@/components/OptionalSlot';
+import { UpdateCard } from '@/components/UpdateCard';
+import { InboxTab } from '@/components/InboxTab';
+import { type Catalog, isSensitiveActivity, loadCachedCatalog, refreshCatalog } from '@/lib/catalog';
+import { applySubs } from '@/lib/subs';
 import { checkBadges } from '@/lib/badges';
 import { fetchLatestSelamSummary, onSelamChanged, SelamSummary } from '@/lib/selam';
 import { answerAsks, onOpenTab, registerPushToken } from '@/lib/ask';
@@ -392,8 +397,64 @@ const ACTIVITY_GROUPS: { id: string; tr: string; en: string; ids: string[] }[] =
   { id: 'out', tr: 'Yolda ve dışarıda', en: 'Out and about', ids: ['travel', 'friends', 'shop', 'sport', 'walk', 'vacation'] },
 ];
 const NEW_ACTIVITY_IDS = ['kids', 'break', 'store', 'shift'];
-const NEW_TAG_KEY = 'new_acts_seen_v155'; // "yeni" etiketi ilk görüldükten sonra 7 gün durur
+let NEW_TAG_KEY = 'new_acts_seen_v155'; // "yeni" etiketi ilk görüldükten sonra 7 gün durur
 const NEW_TAG_MS = 7 * 24 * 60 * 60 * 1000;
+
+// 1.6.0: sunucu katalogu (get_catalog). Uygulamadaki liste yedek olarak kalır.
+// Uygulamada simgesi olan aktivite kendi simgesini kullanır; yeni aktiviteler emoji ile çizilir.
+const BUILTIN_BY_ID: Record<string, Activity> = { ...ACTIVITIES_BY_ID };
+const emojiIcons: Record<string, PhIcon> = {};
+function emojiIcon(emoji: string): PhIcon {
+  if (!emojiIcons[emoji]) {
+    const E: PhIcon = ({ size = 20 }) => (
+      <Text style={{ fontSize: Math.round(size * 0.92), lineHeight: Math.round(size * 1.2), textAlign: 'center' }} allowFontScaling={false}>
+        {emoji}
+      </Text>
+    );
+    emojiIcons[emoji] = E;
+  }
+  return emojiIcons[emoji];
+}
+
+function applyCatalog(c: Catalog) {
+  const list: Activity[] = c.activities.map((a) => {
+    const base = BUILTIN_BY_ID[a.id];
+    return {
+      id: a.id,
+      name: a.tr,
+      icon: base && !a.emoji ? base.icon : a.emoji ? emojiIcon(a.emoji) : base ? base.icon : emojiIcon('✨'),
+      ...PALETTE[a.palette],
+      world: a.world,
+      country: base?.country ?? a.world,
+      peaks: a.peaks,
+      mood: a.mood || undefined,
+    };
+  });
+  ACTIVITIES.splice(0, ACTIVITIES.length, ...list);
+  // Kapatılan aktiviteler listeden kalkar ama geçmiş ve kilitli an için tanınmaya devam eder
+  for (const k of Object.keys(ACTIVITIES_BY_ID)) delete ACTIVITIES_BY_ID[k];
+  Object.assign(ACTIVITIES_BY_ID, BUILTIN_BY_ID, Object.fromEntries(list.map((a) => [a.id, a])));
+  ACTIVITY_GROUPS.splice(
+    0,
+    ACTIVITY_GROUPS.length,
+    ...c.groups
+      .map((g) => ({
+        id: g.id,
+        tr: g.tr,
+        en: g.en,
+        ids: c.activities.filter((a) => a.group === g.id && !a.mood).map((a) => a.id),
+      }))
+      .filter((g) => g.ids.length > 0)
+  );
+  const fresh = c.activities.filter((a) => a.isNew).map((a) => a.id);
+  if (fresh.length) {
+    NEW_ACTIVITY_IDS.splice(0, NEW_ACTIVITY_IDS.length, ...fresh);
+    NEW_TAG_KEY = 'new_acts_seen_' + fresh.join('_');
+  } else NEW_ACTIVITY_IDS.splice(0, NEW_ACTIVITY_IDS.length);
+  registerActivityNames(c.activities);
+  applySubs(c.subs);
+}
+
 
 const FILTERS = [
   { id: 'world', label: 'Herkes' },
@@ -2381,7 +2442,27 @@ export default function HomeScreen() {
   const [history, setHistory] = useState<MomentEntry[]>([]);
   // 1.5.5: yeni aktivitelerdeki "yeni" etiketi, ilk görüldükten sonra 7 gün
   const [newTag, setNewTag] = useState(false);
+  // 1.6.0: katalog sürümü (sunucudan aktivite listesi gelince ekran yeniden çizilir)
+  const [catalogVer, setCatalogVer] = useState(0);
   useEffect(() => {
+    let alive = true;
+    (async () => {
+      // Saklanan katalog açılıştaki ilk okumada uygulanır; burada yalnızca sunucudan tazesi alınır
+      const fresh = await refreshCatalog();
+      if (fresh && alive) {
+        applyCatalog(fresh);
+        setCatalogVer((v) => v + 1);
+      }
+    })().catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!NEW_ACTIVITY_IDS.length) {
+      setNewTag(false);
+      return;
+    }
     AsyncStorage.getItem(NEW_TAG_KEY)
       .then((v) => {
         const t = v ? Number(v) : 0;
@@ -2391,7 +2472,7 @@ export default function HomeScreen() {
         } else setNewTag(Date.now() - t < NEW_TAG_MS);
       })
       .catch(() => {});
-  }, []);
+  }, [catalogVer]);
   const [endNotify, setEndNotify] = useState(false);
   // 1.2: alt menü sekmesi ve "Ben" bilgileri (sadece telefonda)
   const [tab, setTab] = useState<TabId>('now');
@@ -2429,7 +2510,7 @@ export default function HomeScreen() {
   useEffect(() => {
     ensureSession();
     (async () => {
-      const [p, c, l, lk, hs0, en, cr, m] = await Promise.all([
+      const [p, c, l, lk, hs0, en, cr, m, cat] = await Promise.all([
         AsyncStorage.getItem('profile'),
         AsyncStorage.getItem('consent'),
         loadLang(),
@@ -2438,7 +2519,13 @@ export default function HomeScreen() {
         AsyncStorage.getItem(END_NOTIFY_KEY),
         AsyncStorage.getItem(CARRY_KEY),
         loadMe(),
+        loadCachedCatalog(),
       ]);
+      // 1.6.0: saklanan katalog an kilidinden önce uygulanır (sunucudan gelen bir aktivitede kilit kaybolmasın)
+      if (cat) {
+        applyCatalog(cat);
+        setCatalogVer((v) => v + 1);
+      }
       setLang(l);
       setMe(m);
       if (en === 'yes') setEndNotify(true);
@@ -2941,7 +3028,7 @@ export default function HomeScreen() {
     const main = rankMainActivities(new Date(now), liveRows, history);
     const mood = ACTIVITIES.filter((a) => a.mood);
     return [...main, ...mood];
-  }, [now, liveRows, history]);
+  }, [now, liveRows, history, catalogVer]);
 
   async function toggleEndNotify(next: boolean) {
     tap(true);
@@ -3161,7 +3248,7 @@ export default function HomeScreen() {
   // Arkadaş listesinde ikon ve ad göstermek için
   function activityInfo(id: string): ActivityInfo | null {
     const a = ACTIVITIES_BY_ID[id];
-    if (!a) return null;
+    if (!a || isSensitiveActivity(a.id)) return null; // 1.6.0: hassas anlar (İbadet) arkadaşlara görünmez
     return { name: activityName(a.id, lang), Icon: a.icon, fg: a.fg, bg: a.bg };
   }
 
@@ -3448,12 +3535,6 @@ export default function HomeScreen() {
       : ratioLine(filter, value, lang, !!selected.mood);
 
     const elapsed = startedAt ? now - startedAt : 0;
-    // Boş ekranda gösterilecek bugünkü Günün Anı saati (henüz geçmediyse)
-    let nextMoment: Date | null = null;
-    try {
-      const m = getMomentForDay(new Date(now));
-      if (m.getTime() > now) nextMoment = m;
-    } catch {}
     const remainingMin = Math.max(0, Math.ceil((SESSION_MS - elapsed) / 60000));
 
     let resultShown = false;
@@ -3678,8 +3759,8 @@ export default function HomeScreen() {
                   ? 'Gece sakin'
                   : 'The night is quiet'
                 : lang === 'tr'
-                  ? 'İlk gelenlerdensin ⭐'
-                  : "You're one of the first ⭐"}
+                  ? 'İlklerdensin 🌅'
+                  : "You're one of the first 🌅"}
             </Text>
             <Text style={styles.note}>
               {isNight()
@@ -3687,17 +3768,22 @@ export default function HomeScreen() {
                   ? 'Bu saatte uyanık olanlar azınlıkta. Ortalık kalabalıklaştıkça oranın burada belirecek.'
                   : "Few people are awake right now. Your ratio will appear here as things get busier."
                 : lang === 'tr'
-                  ? "Şu an burada az kişi var. Herkes Günün Anı'nda aynı anda cevaplıyor; oranlar en çok o an açılıyor."
-                  : 'Only a few people are here right now. Everyone answers together at the Moment of the Day, when rates are most likely to unlock.'}
+                  ? 'Bugün bu anı henüz az kişi seçti. Şu an en kalabalık yer Günün Sorusu.'
+                  : "Only a few people picked this today. Right now the busiest place is the Question of the Day."}
             </Text>
-            {!isNight() && nextMoment ? (
-              <View style={ws.momentPill}>
-                <Ionicons name="time-outline" size={15} color={fg} />
-                <Text style={ws.momentPillText}>
-                  {lang === 'tr' ? 'Günün Anı: ' : "Today's Moment: "}
-                  <Text style={[ws.momentPillStrong, { color: fg }]}>{hhmm(nextMoment)}</Text>
-                </Text>
-              </View>
+            {/* 1.6.0: az kişi varken kalabalık olan yere, Günün Sorusu'na yönlendir */}
+            {pollsVisible(lang) ? (
+              <Pressable
+                style={styles.inviteBtn}
+                onPress={() => {
+                  tap(true);
+                  goHome();
+                  setTab('polls');
+                }}
+                accessibilityRole="button"
+              >
+                <Text style={styles.inviteText}>{lang === 'tr' ? "Günün Sorusu'nu cevapla →" : 'Answer the Question of the Day →'}</Text>
+              </Pressable>
             ) : null}
             {guess !== null && filter === 'world' ? (
               <Text style={[styles.note, { color: SOFT }]}>
@@ -3789,16 +3875,24 @@ export default function HomeScreen() {
             </ScrollView>
           )}
 
-          {/* 1.5.8: alt soru / yaş kartı / "senin gibiler" özeti (aynı anda yalnızca biri, tek satır) */}
+          {/* 1.6.0: tepki kutusu ve alt soru / yaş / özet kartı tek kaydırılabilir alanda (sıra sunucudan) */}
           {!picking && (resultShown || noData) && !ratioError ? (
-            <ResultExtraCard
+            <OptionalSlot
               activityId={selected.id}
+              mood={!!selected.mood}
               lang={lang}
-              age={consent ? profile.age : undefined}
-              segment={segmentOf(me)}
-              bottomInset={insets.bottom}
-              onAge={ageFromCard}
-              onSegment={segmentFromCard}
+              renderExtra={(onDone) => (
+                <ResultExtraCard
+                  activityId={selected.id}
+                  lang={lang}
+                  age={consent ? profile.age : undefined}
+                  segment={segmentOf(me)}
+                  bottomInset={insets.bottom}
+                  onAge={ageFromCard}
+                  onSegment={segmentFromCard}
+                  onSubAnswered={onDone}
+                />
+              )}
             />
           ) : null}
 
@@ -3985,13 +4079,16 @@ export default function HomeScreen() {
     );
   }
 
-  if (tab === 'badges' && pollsVisible(lang)) {
+  // 1.6.0: Rozetler sekmesi Mesaj kutusunun içine taşındı (eski 'badges' de buraya gelir)
+  if (tab === 'inbox' || tab === 'badges') {
     return (
       <View style={styles.homeRoot}>
-        <BadgesTab
+        <InboxTab
           lang={lang}
           topInset={insets.top}
           bottomSpace={tabBottomSpace}
+          showBadges={pollsVisible(lang)}
+          onOpenNow={() => switchTab('now')}
           onOpenPolls={() => switchTab('polls')}
         />
         {tabBar}
@@ -4140,6 +4237,8 @@ export default function HomeScreen() {
 
           <View style={styles.homeBody}>
             {/* 1.5.9: son girişten beri yeni selam geldiyse tek satırlık şerit */}
+            {/* 1.6.0: mağazada daha yeni sürüm varsa (sunucudan) */}
+            <UpdateCard lang={lang} catalogVer={catalogVer} style={{ marginTop: SP.md }} />
             <SelamBanner lang={lang} active={tab === 'now' && !selected && !dashboardOpen} style={{ marginTop: SP.md }} />
             {lockVisible ? (
               <PressableScale wrapStyle={{ marginTop: SP.lg }} style={hs.lockCard} onPress={() => reopenMoment(lock!)}>

@@ -66,6 +66,11 @@ export function activityName(id: string, lang: Lang): string {
   return ACTIVITY_NAMES[id]?.[lang] ?? id;
 }
 
+// 1.6.0: sunucu katalogundaki adlar (yeni aktiviteler ve ad düzeltmeleri) gömülü listenin üstüne yazılır
+export function registerActivityNames(names: { id: string; tr: string; en: string }[]): void {
+  for (const n of names) ACTIVITY_NAMES[n.id] = { tr: n.tr, en: n.en };
+}
+
 // ---- Ülkeler (değer Türkçe ad olarak saklanır, dile göre gösterilir) ----
 export const COUNTRY_TR = 'Türkiye';
 export const COUNTRY_OTHER = 'Diğer';

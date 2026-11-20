@@ -48,6 +48,7 @@ import { registerPushToken } from '@/lib/ask';
 import { track } from '@/lib/analytics';
 import { checkBadges } from '@/lib/badges';
 import { claimShareBonus } from '@/lib/prediction';
+import { maybeAskReview } from '@/lib/review';
 
 const NAVY = '#0F2A52';
 const AMBER = '#F4B88A'; // 1.5.6: sarı yerine şeftali
@@ -283,6 +284,7 @@ export function PollsTab({ lang, topInset, bottomSpace }: Props) {
 
   function onRevealClose(shareUri: string | null, shareMessage?: string) {
     setReveal(null);
+    if (!shareUri && !shareMessage) maybeAskReview(2500); // 1.6.0: mağaza puanı (en az 3 gün, bir kez)
     // Cevap bu ekranda verildiyse rozet kontrolü sonuç ekranı (ve varsa paylaşım) bittikten sonra
     const badges = () => setTimeout(() => checkBadges().catch(() => {}), 500);
     if (shareMessage) {

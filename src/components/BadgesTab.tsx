@@ -119,11 +119,12 @@ function nodePos(n: number, width: number, total: number) {
 type Props = {
   lang: Lang;
   topInset: number;
+  onBack?: () => void; // 1.6.0: Mesaj kutusunun içinden açılınca geri düğmesi
   bottomSpace: number;
   onOpenPolls: () => void;
 };
 
-export function BadgesTab({ lang, topInset, bottomSpace, onOpenPolls }: Props) {
+export function BadgesTab({ lang, topInset, bottomSpace, onOpenPolls, onBack }: Props) {
   const tx = (lang as string) === 'tr' ? TEXT.tr : TEXT.en;
   const [seg, setSeg] = useState<'path' | 'badges'>('path');
   const [progress, setProgress] = useState<Progress | null>(null);
@@ -395,6 +396,11 @@ export function BadgesTab({ lang, topInset, bottomSpace, onOpenPolls }: Props) {
     <View style={{ flex: 1, backgroundColor: '#FFF9F0' }} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
       <StatusBar style="light" />
       <View style={[styles.header, { paddingTop: topInset + 12 }]}>
+          {onBack ? (
+            <Pressable onPress={onBack} hitSlop={10} accessibilityRole="button" style={{ alignSelf: 'flex-start', marginBottom: 8 }}>
+              <Text style={[styles.kicker, { color: '#ffffff' }]}>{(lang as string) === 'tr' ? '‹ Mesaj kutusu' : '‹ Inbox'}</Text>
+            </Pressable>
+          ) : null}
           <Text style={styles.kicker}>{kicker}</Text>
           <Text style={styles.title}>{tx.title}</Text>
           <View style={styles.chips}>

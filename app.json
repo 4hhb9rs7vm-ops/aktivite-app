@@ -2,7 +2,7 @@
   "expo": {
     "name": "Şu An",
     "slug": "aktivite-app",
-    "version": "1.5.9",
+    "version": "1.6.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "aktiviteapp",
@@ -23,7 +23,11 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.tvfk.aktiviteapp",
-      "googleServicesFile": "./google-services.json"
+      "googleServicesFile": "./google-services.json",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.CAMERA"
+      ]
     },
     "web": {
       "output": "static",
@@ -72,6 +76,12 @@
     "locales": {
       "tr": "./languages/tr.json",
       "en": "./languages/en.json"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/2baa48ab-96b0-43c5-b7a0-a9c9e38e7a13"
     }
   }
 }

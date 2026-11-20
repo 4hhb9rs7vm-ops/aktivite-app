@@ -181,7 +181,9 @@ export function ResultExtraCard({
   bottomInset,
   onAge,
   onSegment,
+  onSubAnswered,
 }: {
+  onSubAnswered?: () => void; // 1.6.0: kaydırılabilir kartta sıradaki karta geçmek için
   activityId: string;
   lang: Lang;
   age: string | undefined;
@@ -246,6 +248,7 @@ export function ResultExtraCard({
   async function pickSub(key: string) {
     // Önce ekranda göster, sonra sunucudan gelen gerçek dağılımla güncelle
     setStats((prev) => ({ total: (prev?.total ?? 0) + 1, mine: key, rows: null }));
+    onSubAnswered?.();
     const s = await answerSub(activityId, key);
     if (s) setStats(s);
   }

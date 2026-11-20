@@ -340,6 +340,11 @@ async function momentCounts(): Promise<{ early: number; night: number }> {
 
 // An seçilen günlerden en uzun kesintisiz seri (kullanıcının kendi saatiyle)
 async function momentBestStreak(): Promise<number> {
+  return (await momentRuns()).best;
+}
+
+// 1.6.0: en uzun seri ve bugünü içeren güncel seri (rozet geçmişten mi geliyor, anlamak için)
+async function momentRuns(): Promise<{ best: number; current: number }> {
   const h = await readJson<{ id: string; at: number }[]>(HISTORY_KEY, []);
   const days = new Set<number>();
   for (const e of Array.isArray(h) ? h : []) {
@@ -354,7 +359,24 @@ async function momentBestStreak(): Promise<number> {
     run = i > 0 && sorted[i] - sorted[i - 1] === 1 ? run + 1 : 1;
     if (run > best) best = run;
   }
-  return best;
+  const now = new Date();
+  const today = Math.round(new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12).getTime() / 86400000);
+  const current = sorted.length && sorted[sorted.length - 1] === today ? run : 0;
+  return { best, current };
+}
+
+// 1.6.0: güncellemeden sonra eski bir seriden kazanılan rozetler ("Daha önce 7 gün üst üste…")
+const RETRO = new Set<BadgeId>();
+export function isRetroBadge(id: BadgeId): boolean {
+  return RETRO.has(id);
+}
+const STREAK_NEED: Partial<Record<BadgeId, number>> = { daily_7: 7, daily_30: 30, tier_7: 7, tier_14: 14, tier_21: 21 };
+export function retroDoneText(id: BadgeId, lang: Lang): string | null {
+  const n = STREAK_NEED[id];
+  if (!n) return null;
+  const moment = id === 'daily_7' || id === 'daily_30';
+  if ((lang as string) === 'tr') return `Daha önce ${n} gün üst üste ${moment ? 'an seçmiştin' : 'cevaplamıştın'}.`;
+  return `You once ${moment ? 'picked a moment' : 'answered'} ${n} days in a row.`;
 }
 
 async function askTotal(): Promise<number> {
@@ -557,6 +579,14 @@ export async function checkBadges(): Promise<BadgeId[]> {
     const now = await computeEarned(base, answers, archive, earned);
     const fresh = now.filter((id) => !earned[id]);
     if (fresh.length === 0) return [];
+    // Seri rozeti bugünkü seriden değil eski bir seriden geliyorsa kutlamada geçmiş zamanla yazılır
+    const runs = await momentRuns();
+    for (const id of fresh) {
+      const need = STREAK_NEED[id];
+      if (!need) continue;
+      const cur = id === 'daily_7' || id === 'daily_30' ? runs.current : base.streak;
+      if (cur < need) RETRO.add(id);
+    }
     const day = istanbulToday();
     for (const id of fresh) earned[id] = day;
     await AsyncStorage.setItem(EARNED_KEY, JSON.stringify(earned)).catch(() => {});

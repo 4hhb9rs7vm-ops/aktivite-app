@@ -67,6 +67,7 @@ import { isOverlayBusy, setOverlayBusy, whenOverlayFree } from '@/lib/overlay';
 import { isFirstDay } from '@/lib/firstRun';
 import { checkBadges } from '@/lib/badges';
 import { claimShareBonus, POINTS_HIT, pointsChanged, submitPrediction } from '@/lib/prediction';
+import { maybeAskReview } from '@/lib/review';
 
 // index.tsx'teki açılış ekranı 3,5 sn sürüyor. Kart, ana ekran kısa bir an göründükten sonra gelsin.
 const SHOW_DELAY_MS = 4300;
@@ -267,6 +268,8 @@ export function DailyQuestionGate() {
     const l = lang;
     setReveal(null);
     visibleRef.current = false;
+    // 1.6.0: sonucu gördükten sonra, paylaşmıyorsa ve en az 3 gündür geliyorsa mağaza puanı (kişi başına bir kez)
+    if (!shareUri && !shareMessage) maybeAskReview(2500);
 
     const next = () => {
       // 1.5.9: cevap bu oturumda verildiyse rozet kontrolü sonuç ekranı (ve varsa paylaşım) bittikten sonra

@@ -4,6 +4,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { ensureSession, supabase } from '@/lib/supabase';
+import { isSensitiveActivity } from '@/lib/catalog';
 
 export type SubOption = { key: string; tr: string; en: string };
 export type SubQuestion = {
@@ -60,6 +61,21 @@ export const SUBS: Record<string, SubQuestion> = {
   },
 };
 
+// 1.6.0: alt sorular sunucu katalogundan gelir; katalog varsa listenin tamamı onunla değişir
+// (sunucuda kapatılan alt soru uygulamada da kalkar).
+export function applySubs(
+  subs: { activity: string; q_tr: string; q_en: string; group_tr: string; group_en: string; options: SubOption[] }[]
+): void {
+  for (const k of Object.keys(SUBS)) delete SUBS[k];
+  for (const s of subs) {
+    SUBS[s.activity] = {
+      q: { tr: s.q_tr, en: s.q_en },
+      group: { tr: s.group_tr, en: s.group_en },
+      options: s.options,
+    };
+  }
+}
+
 export function subLabel(activityId: string, key: string, lang: string): string {
   const o = SUBS[activityId]?.options.find((x) => x.key === key);
   return o ? (lang === 'tr' ? o.tr : o.en) : key;
@@ -111,7 +127,12 @@ export async function fetchAgeToday(age: string): Promise<AgeToday | null> {
     return {
       scope: d.scope === 'age' ? 'age' : 'all',
       people: Number(d.people) || 0,
-      rows: Array.isArray(d.rows) ? d.rows.map((r: any) => ({ activity: String(r.activity), pct: Number(r.pct) || 0 })) : null,
+      // 1.6.0: hassas anlar (İbadet) yaş özetinde gösterilmez
+      rows: Array.isArray(d.rows)
+        ? d.rows
+            .map((r: any) => ({ activity: String(r.activity), pct: Number(r.pct) || 0 }))
+            .filter((r: { activity: string }) => !isSensitiveActivity(r.activity))
+        : null,
     };
   } catch {
     return null;

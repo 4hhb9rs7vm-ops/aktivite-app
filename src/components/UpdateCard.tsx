@@ -2,18 +2,16 @@
 // Altındaki sürümlerde ana ekranın üstünde görünür; kapatılınca o sürüm için bir daha çıkmaz.
 // min_version'ın altındaysa kapatılamaz (zorunlu güncelleme gerektiğinde).
 import { useEffect, useState } from 'react';
-import { Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 
 import type { Lang } from '@/lib/i18n';
 import { getCatalog, versionCode } from '@/lib/catalog';
+import { openStore } from '@/lib/store';
 
 const KEY = 'update_dismissed_v1'; // kapatılan sürüm kodu
-const IOS_URL = 'https://apps.apple.com/app/id6817275887';
-const ANDROID_MARKET = 'market://details?id=com.tvfk.aktiviteapp';
-const ANDROID_WEB = 'https://play.google.com/store/apps/details?id=com.tvfk.aktiviteapp';
 
 export function UpdateCard({ lang, catalogVer, style }: { lang: Lang; catalogVer: number; style?: StyleProp<ViewStyle> }) {
   const T = (lang as string) === 'tr';
@@ -39,10 +37,7 @@ export function UpdateCard({ lang, catalogVer, style }: { lang: Lang; catalogVer
 
   if (state === 'hidden') return null;
 
-  function open() {
-    if (Platform.OS === 'ios') Linking.openURL(IOS_URL).catch(() => {});
-    else Linking.openURL(ANDROID_MARKET).catch(() => Linking.openURL(ANDROID_WEB).catch(() => {}));
-  }
+  const open = openStore;
 
   return (
     <View style={[styles.card, style]}>

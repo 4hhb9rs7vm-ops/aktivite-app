@@ -3872,29 +3872,29 @@ export default function HomeScreen() {
               showsVerticalScrollIndicator={false}
             >
               {body}
+              {/* 1.6.0: tepki kutusu ve alt soru / yaş / özet kartı, oran kartının hemen altında (sıra sunucudan) */}
+              {!picking && (resultShown || noData) && !ratioError ? (
+                <OptionalSlot
+                  activityId={selected.id}
+                  mood={!!selected.mood}
+                  lang={lang}
+                  renderExtra={(onDone) => (
+                    <ResultExtraCard
+                      activityId={selected.id}
+                      lang={lang}
+                      age={consent ? profile.age : undefined}
+                      segment={segmentOf(me)}
+                      bottomInset={insets.bottom}
+                      onAge={ageFromCard}
+                      onSegment={segmentFromCard}
+                      onSubAnswered={onDone}
+                    />
+                  )}
+                />
+              ) : null}
             </ScrollView>
           )}
 
-          {/* 1.6.0: tepki kutusu ve alt soru / yaş / özet kartı tek kaydırılabilir alanda (sıra sunucudan) */}
-          {!picking && (resultShown || noData) && !ratioError ? (
-            <OptionalSlot
-              activityId={selected.id}
-              mood={!!selected.mood}
-              lang={lang}
-              renderExtra={(onDone) => (
-                <ResultExtraCard
-                  activityId={selected.id}
-                  lang={lang}
-                  age={consent ? profile.age : undefined}
-                  segment={segmentOf(me)}
-                  bottomInset={insets.bottom}
-                  onAge={ageFromCard}
-                  onSegment={segmentFromCard}
-                  onSubAnswered={onDone}
-                />
-              )}
-            />
-          ) : null}
 
           {/* Selam: kaydırma alanının dışında, her ekran boyunda görünür kalsın */}
           {!picking && (resultShown || noData) && !ratioError ? (
@@ -4774,7 +4774,7 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: '#ffffff',
     borderRadius: 28,
-    paddingVertical: SP.xxxl - SP.xs,
+    paddingVertical: SP.xl, // 1.6.0: tepki kutusu yukarı gelsin diye 28'den 20'ye
     paddingHorizontal: SP.xxl,
     alignItems: 'center',
     overflow: 'hidden',

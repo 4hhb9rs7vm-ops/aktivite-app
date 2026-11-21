@@ -92,10 +92,6 @@ function ChipsCard({
   onDismiss?: () => void;
 }) {
   // Şıklar ekrana sığmıyorsa sağda küçük bir ok görünür; sona kaydırılınca kaybolur
-  const [boxW, setBoxW] = useState(0);
-  const [contentW, setContentW] = useState(0);
-  const [x, setX] = useState(0);
-  const hasMore = boxW > 0 && contentW > boxW + 4 && x < contentW - boxW - 8;
   return (
     <View style={st.card}>
       <View style={st.cardHead}>
@@ -109,17 +105,8 @@ function ChipsCard({
           </Pressable>
         ) : null}
       </View>
-      <View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={st.chips}
-        keyboardShouldPersistTaps="handled"
-        onLayout={(e) => setBoxW(e.nativeEvent.layout.width)}
-        onContentSizeChange={(w) => setContentW(w)}
-        onScroll={(e) => setX(e.nativeEvent.contentOffset.x)}
-        scrollEventThrottle={32}
-      >
+      {/* 1.6.0: şıklar alt alta sarılır (tepki kutusuyla aynı), yarım kalan şık olmaz */}
+      <View style={st.chips}>
         {options.map((o) => (
           <Pressable
             key={o.key}
@@ -133,12 +120,6 @@ function ChipsCard({
             <Text style={st.chipText}>{o.label}</Text>
           </Pressable>
         ))}
-      </ScrollView>
-      {hasMore ? (
-        <View style={st.moreHint} pointerEvents="none">
-          <Text style={st.moreHintText}>›</Text>
-        </View>
-      ) : null}
       </View>
       {note ? <Text style={st.note}>{note}</Text> : null}
     </View>
@@ -386,8 +367,8 @@ const st = StyleSheet.create({
   kicker: { fontFamily: F.bold, fontSize: 11, letterSpacing: 0.8, color: KICKER },
   title: { fontFamily: F.bold, fontSize: 16, color: INK, marginTop: 3 },
   close: { fontFamily: F.bold, fontSize: 15, color: '#A0A4B2', paddingLeft: 10 },
-  chips: { gap: 8, paddingRight: 14, paddingTop: 9 },
-  chip: { borderWidth: 1.5, borderColor: '#D9DCE8', borderRadius: 999, paddingVertical: 8, paddingHorizontal: 13, backgroundColor: '#ffffff' },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, paddingRight: 14, paddingTop: 9 },
+  chip: { borderWidth: 1.5, borderColor: '#D9DCE8', borderRadius: 999, paddingVertical: 7, paddingHorizontal: 12, backgroundColor: '#ffffff' },
   chipText: { fontFamily: F.medium, fontSize: 14, color: INK },
   note: { fontFamily: F.regular, fontSize: 12, color: MUTED, marginTop: 8, paddingRight: 14 },
   summary: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingRight: 14 },

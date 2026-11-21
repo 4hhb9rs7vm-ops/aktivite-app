@@ -12,6 +12,7 @@ import { initFirstRun } from '@/lib/firstRun';
 import { BadgeCelebration } from '@/components/BadgeCelebration';
 import { CampusLeagueHost } from '@/components/CampusLeague';
 import { BonusMomentHost } from '@/components/Prediction';
+import { openStore } from '@/lib/store';
 
 // Yerel açılış ekranı (lacivert zemin + logo), ana ekran hazır olana kadar açık kalır.
 // Kapatma işi src/app/index.tsx içinde, yazı tipleri ve veriler yüklenince yapılır.
@@ -38,6 +39,11 @@ export default function RootLayout() {
       if (id) handled.add(id);
       const type = (res?.notification?.request?.content?.data as { type?: string } | undefined)?.type ?? 'unknown';
       track('notif_open', { type });
+      // 1.6.0: "Yeni sürüm" bildirimi mağaza sayfasını açar
+      if (type === 'update') {
+        openStore();
+        return;
+      }
       const target = tabForNotification(type);
       if (target) {
         track('ask_tap', { type });

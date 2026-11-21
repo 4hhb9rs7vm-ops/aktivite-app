@@ -7,7 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ensureSession, supabase } from '@/lib/supabase';
 import { istanbulToday } from '@/lib/dailyQuestion';
 
-export type ReactionBox = { open: boolean; left: number };
+export type ReactionBox = { open: boolean; left: number; ask: boolean }; // ask: soru tepkisini cevaplayabilecek biri var mı
 export type ReactionItem = { id: number; activity: string; key: string; reply: string | null };
 export type MyReactions = { got: ReactionItem[]; answers: ReactionItem[] };
 export type SendResult = { ok: true; sent: number; left: number } | { ok: false; error: string };
@@ -50,7 +50,7 @@ export async function fetchReactionBox(activityId: string): Promise<ReactionBox 
     const { data, error } = await supabase.rpc('get_reaction_box', { p_activity: activityId });
     if (error || !data) return null;
     const d = data as any;
-    return { open: d.open === true, left: Number(d.left) || 0 };
+    return { open: d.open === true, left: Number(d.left) || 0, ask: d.ask !== false };
   } catch {
     return null;
   }
@@ -135,4 +135,40 @@ export async function markReactionsSeen(mark: SeenMark): Promise<void> {
 
 export function notifyReactionsChanged(): void {
   emit();
+}
+
+// 1.6.0: tepki kutusunda sonuç. Bugün bu aktivitede bırakılan tepkilerin oranı (en az 5 gönderim yoksa rows null).
+export type ReactionStats = { enough: boolean; rows: { key: string; pct: number }[] | null };
+export async function fetchReactionStats(activityId: string): Promise<ReactionStats | null> {
+  try {
+    if (!(await ensureSession())) return null;
+    const { data, error } = await supabase.rpc('get_reaction_stats', { p_activity: activityId });
+    if (error || !data) return null;
+    const d = data as any;
+    const rows = Array.isArray(d.rows)
+      ? d.rows.map((r: any) => ({ key: String(r?.key ?? ''), pct: Number(r?.pct) || 0 })).filter((r: { key: string }) => r.key)
+      : null;
+    return { enough: d.enough === true, rows };
+  } catch {
+    return null;
+  }
+}
+
+// Bu aktivitede bugün sorduğum son soru ve gelen cevapların oranı (soru yoksa null)
+export type AskStatus = { key: string; replies: { key: string; pct: number }[] };
+export async function fetchAskStatus(activityId: string): Promise<AskStatus | null> {
+  try {
+    if (!(await ensureSession())) return null;
+    const { data, error } = await supabase.rpc('get_ask_status', { p_activity: activityId });
+    if (error || !data) return null;
+    const d = data as any;
+    return {
+      key: String(d.key ?? ''),
+      replies: Array.isArray(d.replies)
+        ? d.replies.map((r: any) => ({ key: String(r?.key ?? ''), pct: Number(r?.pct) || 0 })).filter((r: { key: string }) => r.key)
+        : [],
+    };
+  } catch {
+    return null;
+  }
 }
